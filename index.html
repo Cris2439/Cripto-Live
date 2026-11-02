@@ -199,6 +199,7 @@ function connect(){
   try{ws=new WebSocket('wss://stream.bybit.com/v5/public/linear')}catch(e){return retry()}
   ws.onopen=()=>{setStatus('ao vivo',true);
     for(const c of COINS)for(const sym of [c.s+'USDT',...(c.alt||[])])ws.send(JSON.stringify({op:'subscribe',args:[`tickers.${sym}`,`kline.15.${sym}`,`allLiquidation.${sym}`]}));
+    if(sub1){const x=sub1;sub1=null;wsSub('subscribe',[x]);sub1=x}
     clearInterval(wsT);wsT=setInterval(()=>{try{ws.send('{"op":"ping"}')}catch(e){}},18000)};
   ws.onmessage=e=>{lastMsg=Date.now();let m;try{m=JSON.parse(e.data)}catch(_){return}if(!m.topic)return;onMsg(m)};
   ws.onclose=()=>{clearInterval(wsT);setStatus('desligado',false);retry()};
@@ -210,10 +211,13 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(!ws||ws.
 
 function onMsg(m){
   const [kind,...rest]=m.topic.split('.');const sym=rest[rest.length-1];const k=SYM2C[sym];if(!k)return;const s=S[k];
-  if(kind==='tickers'){const d=m.data;
+  if(kind==='tickers'){const d=m.data;s.bsym=sym;
     if(d.lastPrice)s.price=+d.lastPrice;if(d.price24hPcnt)s.ch24=+d.price24hPcnt;if(d.fundingRate)s.funding=+d.fundingRate;
     if(d.openInterestValue)s.oi=+d.openInterestValue;if(d.turnover24h)s.turn=+d.turnover24h;if(d.highPrice24h)s.hi=+d.highPrice24h;if(d.lowPrice24h)s.lo=+d.lowPrice24h;
     if(s.c15.length&&s.price){const l=s.c15[s.c15.length-1];if(Date.now()-l.t<M15){l.c=s.price;l.h=Math.max(l.h,s.price);l.l=Math.min(l.l,s.price)}}
+  }else if(kind==='kline'&&rest[0]==='1'){if(!s.c1)return;for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c1;const l=c[c.length-1];
+      if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t){c.push(x);if(c.length>1500)c.shift()}}
+    if(sel===k&&cfg.ctf==='1m')fillChart(false);
   }else if(kind==='kline'){for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c15;const l=c[c.length-1];
       if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t)c.push(x);
       if(d.confirm){checkBreak(s,x);compute(s)}}}
@@ -287,25 +291,39 @@ function renderCfg(){
 
 function openSheet(k){sel=k;$('sheet').classList.add('on');
   $('pane').innerHTML=`<div class="grab"></div><div id="shTop"></div>
-   <div class="row" style="margin-top:10px"><div class="seg" id="chTf"><button data-c="15m">15m</button><button data-c="1h">1h</button><button data-c="4h">4h</button></div><span class="spacer"></span>
+   <div class="row" style="margin-top:10px"><div class="seg" id="chTf"><button data-c="1m">1m</button><button data-c="15m">15m</button><button data-c="1h">1h</button><button data-c="4h">4h</button></div><span class="spacer"></span>
    <span class="sm" style="color:#60a5fa">EMA20</span><span class="sm" style="color:#f59e0b">EMA50</span><span class="sm" style="color:#c084fc">VWAP</span></div>
    <div id="chart"></div><div id="shBody"></div>`;
   $('pane').scrollTop=0;
   $('chTf').querySelectorAll('button').forEach(b=>{b.classList.toggle('on',b.dataset.c===cfg.ctf);b.onclick=()=>{cfg.ctf=b.dataset.c;save('cfg',cfg);$('chTf').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));buildChart()}});
   renderSheet();buildChart()}
-function closeSheet(){sel=null;$('sheet').classList.remove('on');if(CH.chart){CH.chart.remove();CH.chart=null}}
+function closeSheet(){sel=null;set1mStream(null);$('sheet').classList.remove('on');if(CH.chart){CH.chart.remove();CH.chart=null}}
 $('sheet').onclick=e=>{if(e.target.id==='sheet')closeSheet()};
 
 /* ===== Gráfico (TradingView Lightweight Charts) ===== */
 const CH={chart:null,candle:null,vol:null,e20:null,e50:null,vw:null,lines:[],key:'',lastT:0};
 const TFK={'15m':1,'1h':4,'4h':16};
+const M1=60000;let sub1=null;
 function emaSeries(c,n){const k=2/(n+1);let e=null;const out=[];c.forEach((x,i)=>{if(i<n-1)return;if(e===null)e=c.slice(0,n).reduce((a,y)=>a+y.c,0)/n;else e=x.c*k+e*(1-k);out.push({time:x.t/1000,value:e})});return out}
 function vwapSeries(c){let day=-1,pv=0,vv=0;const out=[];for(const x of c){const d=Math.floor(x.t/86400000);if(d!==day){day=d;pv=0;vv=0}const tp=(x.h+x.l+x.c)/3;pv+=tp*x.v;vv+=x.v;if(vv>0)out.push({time:x.t/1000,value:pv/vv})}return out}
-function chartData(){const s=S[sel];const c=agg(s.c15,TFK[cfg.ctf]);return {s,c}}
+function chartData(){const s=S[sel];const c=cfg.ctf==='1m'?(s.c1||[]):agg(s.c15,TFK[cfg.ctf]);return {s,c}}
+// Velas de 1 minuto: só para a moeda aberta (histórico REST + stream WS)
+function bySym(s){return s.bsym||(s.s+'USDT')}
+async function load1m(k){const s=S[k];
+  try{const j=await getJSON(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${bySym(s)}&interval=1&limit=1000`);
+    if(j.retCode===0&&j.result.list.length){const h=j.result.list.map(r=>({t:+r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[5]})).reverse();
+      const m=new Map(h.map(x=>[x.t,x]));for(const x of (s.c1||[]))m.set(x.t,x);s.c1=[...m.values()].sort((a,b)=>a.t-b.t).slice(-1500);return}}catch(e){}
+  try{const j=await getJSON(`https://www.okx.com/api/v5/market/candles?instId=${k}-USDT-SWAP&bar=1m&limit=300`);
+    if(j.code==='0'&&j.data.length){s.c1=j.data.map(r=>({t:+r[0],o:+r[1],h:+r[2],l:+r[3],c:+r[4],v:+r[6]})).reverse()}}catch(e){}
+}
+function wsSub(op,args){try{if(ws&&ws.readyState===1)ws.send(JSON.stringify({op,args}))}catch(e){}}
+function set1mStream(k){const want=k&&cfg.ctf==='1m'?`kline.1.${bySym(S[k])}`:null;if(want===sub1)return;if(sub1)wsSub('unsubscribe',[sub1]);sub1=want;if(want)wsSub('subscribe',[want])}
 function buildChart(){
   const box=$('chart');if(!box)return;
   if(CH.chart){CH.chart.remove();CH.chart=null}
   if(typeof LightweightCharts==='undefined'){box.innerHTML='<p class="mut sm">Gráfico indisponível (sem ligação à biblioteca).</p>';return}
+  set1mStream(sel);
+  if(cfg.ctf==='1m'&&!(S[sel].c1&&S[sel].c1.length)){box.innerHTML='<p class="mut sm" style="padding:20px 0">A carregar velas de 1 minuto…</p>';const k=sel;load1m(k).then(()=>{if(sel===k&&cfg.ctf==='1m')buildChart()});return}
   const {s,c}=chartData();if(!c.length){box.innerHTML='<p class="mut sm" style="padding:20px 0">A carregar histórico…</p>';CH.key='';return}
   box.innerHTML='';
   const p=s.price||c[c.length-1].c;const dec=p>=1000?1:p>=100?2:p>=1?3:p>=.1?4:6;
@@ -323,7 +341,7 @@ function buildChart(){
   CH.e20=ch.addLineSeries({...lo,color:'#60a5fa'});CH.e50=ch.addLineSeries({...lo,color:'#f59e0b'});
   CH.vw=cfg.ctf==='4h'?null:ch.addLineSeries({...lo,color:'#c084fc',lineStyle:2});
   CH.chart=ch;fillChart(true);
-  const n=c.length;ch.timeScale().setVisibleLogicalRange({from:Math.max(0,n-(cfg.ctf==='4h'?60:90)),to:n+3});
+  const n=c.length;ch.timeScale().setVisibleLogicalRange({from:Math.max(0,n-(cfg.ctf==='4h'?60:cfg.ctf==='1m'?120:90)),to:n+3});
 }
 function fillChart(full){
   if(!CH.chart||!sel)return;const {s,c}=chartData();if(!c.length)return;
