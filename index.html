@@ -69,11 +69,21 @@ input{background:var(--card2);border:1px solid var(--line);color:var(--tx);borde
 .liqbar{height:8px;border-radius:4px;background:var(--dn);overflow:hidden;margin-top:6px}
 .liqbar i{display:block;height:100%;background:var(--up)}
 .note{font-size:11px;color:var(--mut);margin-top:10px}
-.toast{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;z-index:20;transform:translateY(-150%);transition:transform .3s;font-weight:600}
+.toast{pointer-events:none;position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;z-index:20;transform:translateY(-150%);transition:transform .3s;font-weight:600}
 .toast.on{transform:none}
 .legend{position:absolute;left:12px;bottom:76px;font-size:11px;color:var(--mut);pointer-events:none}
 #chart{margin-top:8px;border-radius:12px;overflow:hidden;min-height:300px;background:#12151c;border:1px solid var(--line)}
 #chart .mut{padding:12px}
+textarea{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:10px;font:14px/1.4 inherit;width:100%;margin-top:10px;resize:vertical}
+#repTx{font:11px/1.35 ui-monospace,Menlo,monospace}
+.stat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stat .kv .v{font-size:16px}
+.tr{border-left:3px solid var(--line)}.tr.up{border-left-color:var(--up)}.tr.dn{border-left-color:var(--dn)}
+.tog{width:48px;height:28px;border-radius:999px;background:var(--line);border:0;position:relative}
+.tog::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s}
+.tog.on{background:var(--up)}.tog.on::after{left:23px}
+#eq{height:140px;margin-top:10px;border-radius:10px;overflow:hidden}
+nav button{font-size:10px}
 </style>
 </head>
 <body>
@@ -91,16 +101,24 @@ input{background:var(--card2);border:1px solid var(--line);color:var(--tx);borde
   <section class="view on" id="vBub"><canvas id="cv"></canvas><div class="legend" id="legend"></div></section>
   <section class="view" id="vList"></section>
   <section class="view" id="vAlert"></section>
+  <section class="view" id="vBot"></section>
   <section class="view" id="vCfg"></section>
 </main>
 <nav>
   <button data-v="vBub" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="10" r="6"/><circle cx="17" cy="16" r="4"/></svg>Bolhas</button>
   <button data-v="vList"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Sinais</button>
   <button data-v="vAlert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span>Alertas<span id="aBadge"></span></span></button>
+  <button data-v="vBot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13h.01M15 13h.01M9 17h6"/></svg>Bot</button>
   <button data-v="vCfg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 3h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 21h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>Setup</button>
 </nav>
 <div class="sheet" id="sheet"><div class="pane" id="pane"></div></div>
 <div class="toast" id="toast"></div>
+<div class="sheet" id="noteDlg"><div class="pane"><div class="grab"></div><b id="noteTtl">Nota</b>
+ <textarea id="noteTx" rows="5" placeholder="Porque entraste/ficaste de fora, o que correu bem ou mal…"></textarea>
+ <div class="row" style="margin-top:10px"><button class="btn" id="noteX">Cancelar</button><span class="spacer"></span><button class="btn acc" id="noteOk">Guardar</button></div></div></div>
+<div class="sheet" id="repDlg"><div class="pane"><div class="grab"></div><b>Relatório do bot</b><p class="mut sm">Copia e cola na conversa com o Claude para a análise.</p>
+ <textarea id="repTx" rows="12" readonly></textarea>
+ <div class="row" style="margin-top:10px"><button class="btn" id="repX">Fechar</button><span class="spacer"></span><button class="btn acc" id="repCp">Copiar</button></div></div></div>
 
 <script>
 "use strict";
@@ -117,7 +135,7 @@ const M15=900000;
 const S={}; const SYM2C={};
 COINS.forEach(c=>{S[c.s]={...c,price:null,ch24:null,funding:null,oi:null,turn:null,hi:null,lo:null,rank:null,mcap:null,c15:[],lv:{sup:[],res:[]},ind:null,liq:[],src:null};
   [c.s+'USDT',...(c.alt||[])].forEach(x=>SYM2C[x]=c.s);});
-const cfg=load('cfg',{ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
+const cfg=load('cfg',{botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
 let alerts=load('alerts',[]); let unseen=0;
 const liqAll=[]; // {t,s,side,usd}
 
@@ -180,7 +198,7 @@ async function loadHist(c){
     try{const k=await fn(c);const s=S[c.s];
       // fundir com velas já recebidas por WS
       const m=new Map(k.map(x=>[x.t,x]));for(const x of s.c15)m.set(x.t,x);
-      s.c15=[...m.values()].sort((a,b)=>a.t-b.t).slice(-1200);s.src=name;compute(s);return}
+      s.c15=[...m.values()].sort((a,b)=>a.t-b.t).slice(-1200);s.src=name;compute(s);botOffline(s);return}
     catch(e){if(e instanceof TypeError)dead[name]=true}}
 }
 async function loadAllHist(){for(const c of COINS){await loadHist(c);await sleep(120)}render(true)}
@@ -215,27 +233,103 @@ function onMsg(m){
     if(d.lastPrice)s.price=+d.lastPrice;if(d.price24hPcnt)s.ch24=+d.price24hPcnt;if(d.fundingRate)s.funding=+d.fundingRate;
     if(d.openInterestValue)s.oi=+d.openInterestValue;if(d.turnover24h)s.turn=+d.turnover24h;if(d.highPrice24h)s.hi=+d.highPrice24h;if(d.lowPrice24h)s.lo=+d.lowPrice24h;
     if(s.c15.length&&s.price){const l=s.c15[s.c15.length-1];if(Date.now()-l.t<M15){l.c=s.price;l.h=Math.max(l.h,s.price);l.l=Math.min(l.l,s.price)}}
+    botTick(s);
   }else if(kind==='kline'&&rest[0]==='1'){if(!s.c1)return;for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c1;const l=c[c.length-1];
       if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t){c.push(x);if(c.length>1500)c.shift()}}
     if(sel===k&&cfg.ctf==='1m')fillChart(false);
   }else if(kind==='kline'){for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c15;const l=c[c.length-1];
       if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t)c.push(x);
-      if(d.confirm){checkBreak(s,x);compute(s)}}}
+      if(d.confirm){const br=findBreak(s,x);compute(s);if(br){const bot=botOnBreak(s,br.dir,br.lvl,x.c);pushAlert({t:Date.now(),s:s.s,type:'brk',dir:br.dir,txt:`${br.dir>0?'Rompeu resistência':'Perdeu suporte'} ${fp(br.lvl)} (fecho 15m ${fp(x.c)})\n${planTxt(br.dir>0?'LONG':'SHORT',x.c)}\n${bot}`},true)}}}}
   else if(kind==='allLiquidation'){for(const d of m.data){const usd=+d.v*+d.p;const side=d.S==='Buy'?'LONG':'SHORT';const it={t:+d.T,s:k,side,usd,p:+d.p};
       s.liq.unshift(it);s.liq.length=Math.min(s.liq.length,30);liqAll.unshift(it);if(liqAll.length>400)liqAll.length=400;
       if(usd>=cfg.liqMin)pushAlert({t:it.t,s:k,type:'liq',txt:`${side} liquidado ${fusd(usd)} @ ${fp(it.p)}`,dir:side==='LONG'?-1:1},false)}}
 }
 // Alerta só em quebras de S/R confirmadas no fecho de vela de 15m
-function checkBreak(s,x){
-  const c=s.c15;if(c.length<3)return;const prev=c[c.length-2].c;
-  for(const r of s.lv.res)if(prev<=r&&x.c>r*1.001)pushAlert({t:Date.now(),s:s.s,type:'brk',dir:1,txt:`Rompeu resistência ${fp(r)} (fecho 15m ${fp(x.c)})`},true);
-  for(const p of s.lv.sup)if(prev>=p&&x.c<p*.999)pushAlert({t:Date.now(),s:s.s,type:'brk',dir:-1,txt:`Perdeu suporte ${fp(p)} (fecho 15m ${fp(x.c)})`},true);
+function findBreak(s,x){
+  const c=s.c15;if(c.length<3)return null;const prev=c[c.length-2].c;
+  const r=s.lv.res.filter(r=>prev<=r&&x.c>r*1.001).sort((a,b)=>b-a)[0];if(r)return {dir:1,lvl:r};
+  const p=s.lv.sup.filter(p=>prev>=p&&x.c<p*.999).sort((a,b)=>a-b)[0];if(p)return {dir:-1,lvl:p};
+  return null;
 }
 function pushAlert(a,loud){alerts.unshift(a);if(alerts.length>200)alerts.length=200;save('alerts',alerts);
   if(curView!=='vAlert'){unseen++;}
-  if(loud){toast(`${a.s}: ${a.txt}`);try{navigator.vibrate&&navigator.vibrate([120,60,120])}catch(e){}
-    if(cfg.notif&&'Notification'in window&&Notification.permission==='granted'){try{new Notification(`${a.s} — ${a.dir>0?'↑':'↓'}`,{body:a.txt})}catch(e){}}}
+  if(loud){toast(`${a.s}: ${a.txt.split('\n')[0]}`);try{navigator.vibrate&&navigator.vibrate([120,60,120])}catch(e){}
+    if(cfg.notif&&'Notification'in window&&Notification.permission==='granted'){try{new Notification(`${a.s} — ${a.dir>0?'↑':'↓'}`,{body:a.txt.replace(/\n/g,' · ')})}catch(e){}}}
   render()}
+
+/* ===== Bot paper trading ===== */
+let BOT=load('bot',{open:[],closed:[],skipped:0,since:Date.now()});
+if(!Array.isArray(BOT.open))BOT={open:[],closed:[],skipped:0,since:Date.now()};
+function botSave(){save('bot',BOT)}
+function plan(side,p,k=SLTP){const l=side==='LONG';return {entry:p,sl:l?p*(1-k):p*(1+k),tp:l?p*(1+k):p*(1-k),liq:l?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR)}}
+function planTxt(side,p){const q=plan(side,p);return `Plano ${side}: entrada ${fp(q.entry)} · SL ${fp(q.sl)} · TP ${fp(q.tp)} · liq ≈ ${fp(q.liq)}`}
+function pnlOf(t,exit){const pos=t.margin*LEV;const r=t.side==='LONG'?exit/t.entry-1:1-exit/t.entry;return pos*r-pos*FEE*2}
+// decide se o bot entra numa quebra; devolve texto com a decisão
+function botOnBreak(s,dir,lvl,close){
+  const side=dir>0?'LONG':'SHORT';const i=s.ind;
+  if(!cfg.bot)return 'bot desligado';
+  const why=[];
+  if(BOT.open.some(t=>t.s===s.s))why.push('já tem posição nesta moeda');
+  if(BOT.open.length>=cfg.botMax)why.push(`máximo de ${cfg.botMax} posições`);
+  const last=BOT.closed.find(t=>t.s===s.s);if(last&&Date.now()-last.t1<3600000)why.push('pausa de 1h após o último trade');
+  if(!i)why.push('sem indicadores');
+  else{
+    if(side==='LONG'&&i.sc<cfg.botSc)why.push(`viés ${i.sc>0?'+':''}${i.sc} insuficiente para LONG`);
+    if(side==='SHORT'&&i.sc>-cfg.botSc)why.push(`viés ${i.sc>0?'+':''}${i.sc} insuficiente para SHORT`);
+    if(side==='LONG'&&i.r15>78)why.push('RSI15 sobrecomprado');
+    if(side==='SHORT'&&i.r15<22)why.push('RSI15 sobrevendido');
+  }
+  if(s.funding!=null&&side==='LONG'&&s.funding>.0005)why.push('funding muito alto');
+  if(s.funding!=null&&side==='SHORT'&&s.funding<-.0005)why.push('funding muito negativo');
+  if(why.length){BOT.skipped++;botSave();return 'bot ficou de fora: '+why.join(', ')}
+  const pct=(cfg.botPct||1.5)/100;const q=plan(side,close,pct);
+  const t={pct,id:Date.now().toString(36)+s.s,s:s.s,side,...q,margin:cfg.margin,t0:Date.now(),lvl,sc:i.sc,r15:i.r15!=null?Math.round(i.r15):null,
+    reason:`${dir>0?'Rompeu R':'Perdeu S'} ${num(lvl)}`,note:''};
+  BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);return `🤖 bot abriu ${side} @ ${fp(close)}`;
+}
+function botClose(t,exit,how,when){
+  const i=BOT.open.indexOf(t);if(i<0)return;BOT.open.splice(i,1);
+  const c={...t,exit,t1:when||Date.now(),how,pnl:pnlOf(t,exit)};BOT.closed.unshift(c);if(BOT.closed.length>500)BOT.closed.length=500;botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
+  pushAlert({t:c.t1,s:t.s,type:'bot',dir:c.pnl>0?1:-1,txt:`🤖 ${t.side} fechado em ${how} @ ${fp(exit)} · ${fmtPnl(c.pnl)}`},true);
+}
+function num(x){return x==null?'':+(+x).toPrecision(6)}
+function fmtPnl(x){return (x>=0?'+$':'-$')+Math.abs(x).toFixed(2)}
+// verificação em tempo real (cada tick)
+function botTick(s){if(!BOT.open.length||s.price==null)return;const p=s.price;
+  for(const t of BOT.open.filter(t=>t.s===s.s)){const l=t.side==='LONG';
+    if(l?p<=t.sl:p>=t.sl)botClose(t,t.sl,'SL');else if(l?p>=t.tp:p<=t.tp)botClose(t,t.tp,'TP')}}
+// resolve posições abertas enquanto a app esteve fechada (velas 15m; se SL e TP na mesma vela, assume SL)
+function botOffline(s){
+  for(const t of BOT.open.filter(t=>t.s===s.s)){const l=t.side==='LONG';const start=Math.floor(t.t0/M15)*M15+M15;
+    for(const x of s.c15){if(x.t<start||Date.now()-x.t<M15)continue;
+      const hitSL=l?x.l<=t.sl:x.h>=t.sl, hitTP=l?x.h>=t.tp:x.l<=t.tp;
+      if(hitSL){botClose(t,t.sl,'SL (offline)',x.t+M15);break}if(hitTP){botClose(t,t.tp,'TP (offline)',x.t+M15);break}}}}
+function botStats(list){
+  const n=list.length;const w=list.filter(t=>t.pnl>0);const L=list.filter(t=>t.pnl<=0);
+  const gw=w.reduce((a,t)=>a+t.pnl,0),gl=-L.reduce((a,t)=>a+t.pnl,0);
+  let eq=0,pk=0,dd=0;for(const t of list.slice().reverse()){eq+=t.pnl;pk=Math.max(pk,eq);dd=Math.max(dd,pk-eq)}
+  return {n,w:w.length,wr:n?w.length/n:0,pnl:gw-gl,pf:gl?gw/gl:(gw?Infinity:0),dd,avgW:w.length?gw/w.length:0,avgL:L.length?gl/L.length:0,
+    best:n?Math.max(...list.map(t=>t.pnl)):0,worst:n?Math.min(...list.map(t=>t.pnl)):0}
+}
+function dt(t){const d=new Date(t);return d.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit'})+' '+hm(t)}
+function botReport(){
+  const C=BOT.closed,st=botStats(C);const by={};for(const t of C){(by[t.s]=by[t.s]||[]).push(t)}
+  const side=x=>botStats(C.filter(t=>t.side===x));const sl=side('LONG'),ss=side('SHORT');
+  const L=[];L.push('RELATÓRIO BOT — CRIPTO LIVE (paper trading)');
+  L.push(`Gerado: ${dt(Date.now())} · desde ${dt(BOT.since)}`);
+  L.push(`Setup atual do bot: ${LEV}x · SL/TP ${cfg.botPct}% · margem atual $${cfg.margin} · viés mínimo ${cfg.botSc} · máx ${cfg.botMax} posições`);
+  L.push(`Fechados: ${st.n} · acerto ${(st.wr*100).toFixed(0)}% · P&L ${fmtPnl(st.pnl)} · PF ${st.pf===Infinity?'∞':st.pf.toFixed(2)} · drawdown máx -$${st.dd.toFixed(2)}`);
+  L.push(`Ganho médio ${fmtPnl(st.avgW)} · perda média -$${st.avgL.toFixed(2)} · melhor ${fmtPnl(st.best)} · pior ${fmtPnl(st.worst)}`);
+  L.push(`LONG: ${sl.n} trades, ${(sl.wr*100).toFixed(0)}%, ${fmtPnl(sl.pnl)} | SHORT: ${ss.n} trades, ${(ss.wr*100).toFixed(0)}%, ${fmtPnl(ss.pnl)}`);
+  const byP={};for(const t of C){const k=((t.pct||SLTP)*100).toFixed(1)+'%';(byP[k]=byP[k]||[]).push(t)}
+  L.push('Por SL/TP: '+Object.entries(byP).map(([k,v])=>{const x=botStats(v);return `${k}: ${x.n}t ${(x.wr*100).toFixed(0)}% ${fmtPnl(x.pnl)}`}).join(' | '));
+  L.push(`Sinais recusados pelos filtros: ${BOT.skipped} · posições abertas: ${BOT.open.length}`);
+  L.push('Por moeda: '+Object.entries(by).map(([k,v])=>{const x=botStats(v);return `${k} ${x.n}t ${(x.wr*100).toFixed(0)}% ${fmtPnl(x.pnl)}`}).join(' | '));
+  if(BOT.open.length){L.push('');L.push('ABERTAS:');for(const t of BOT.open){const p=S[t.s].price;L.push(`${dt(t.t0)},${t.s},${t.side},${num(t.entry)},atual ${num(p)},${p?fmtPnl(pnlOf(t,p)):'?'},score ${t.sc},rsi15 ${t.r15},${t.reason}${t.note?',nota: '+t.note.replace(/[\n,]/g,' '):''}`)}}
+  L.push('');L.push('data_entrada,data_saida,moeda,lado,sl_tp_pct,entrada,saida,resultado,pnl_usd,score,rsi15,motivo,nota');
+  for(const t of C)L.push([dt(t.t0),dt(t.t1),t.s,t.side,((t.pct||SLTP)*100).toFixed(1),num(t.entry),num(t.exit),t.how,t.pnl.toFixed(2),t.sc,t.r15,t.reason,(t.note||'').replace(/[\n,]/g,' ')].join(','));
+  return L.join('\n');
+}
 
 /* ===== UI ===== */
 let curView='vBub',sel=null;
@@ -253,7 +347,7 @@ let lastR=0;
 function render(force){const now=Date.now();if(!force&&now-lastR<1000)return;lastR=now;
   const b=S.BTC;$('btcP').textContent='BTC '+(b.price?fp(b.price):'—');$('btcP').className='pill '+(b.ch24>0?'up':b.ch24<0?'dn':'acc');
   $('aBadge').innerHTML=unseen?`<span class="badge">${unseen}</span>`:'';
-  if(curView==='vList')renderList();else if(curView==='vAlert')renderAlerts();else if(curView==='vCfg'&&force)renderCfg();
+  if(curView==='vList')renderList();else if(curView==='vAlert')renderAlerts();else if(curView==='vCfg'&&force)renderCfg();else if(curView==='vBot'){if(force)renderBot();else botLive()}
   if(sel)renderSheet();
   $('legend').textContent=`Tamanho = ${cfg.sz==='chg'?'variação '+cfg.tf:'volume 24h'} · toca numa bolha`;
 }
@@ -274,9 +368,65 @@ function renderAlerts(){
    <div class="row sm" style="margin-top:6px"><span class="dn">Longs ${fusd(L)}</span><span class="spacer"></span><span class="up">Shorts ${fusd(Sh)}</span></div>
    <div class="liqbar"><i style="width:${tot?Sh/tot*100:50}%;margin-left:auto"></i></div></div>
    <div class="card feed"><div class="row"><b>Alertas</b><span class="spacer"></span><button class="btn" id="clrA">Limpar</button></div>
-   ${alerts.length?alerts.slice(0,80).map(a=>`<div class="it"><span class="t">${hm(a.t)}</span><div><b>${a.s}</b> <span class="pill ${a.type==='brk'?(a.dir>0?'up':'dn'):'warn'}">${a.type==='brk'?'S/R':'Liq'}</span><div class="sm">${a.txt}</div></div></div>`).join(''):'<p class="mut sm">Sem alertas. Só dispara em quebras de suporte/resistência confirmadas no fecho de vela de 15m, e em liquidações grandes.</p>'}</div>`;
+   ${alerts.length?alerts.slice(0,80).map(a=>`<div class="it"><span class="t">${hm(a.t)}</span><div><b>${a.s}</b> <span class="pill ${a.type==='liq'?'warn':(a.dir>0?'up':'dn')}">${a.type==='brk'?'S/R':a.type==='bot'?'Bot':'Liq'}</span><div class="sm">${a.txt.replace(/\n/g,'<br>')}</div></div></div>`).join(''):'<p class="mut sm">Sem alertas. Só dispara em quebras de suporte/resistência confirmadas no fecho de vela de 15m, e em liquidações grandes.</p>'}</div>`;
   $('clrA').onclick=()=>{alerts=[];save('alerts',alerts);render(true)};
 }
+function renderBot(){
+  const st=botStats(BOT.closed);
+  const openH=BOT.open.map(t=>{const up=t.side==='LONG';return `<div class="card tr ${up?'up':'dn'}" data-id="${t.id}"><div class="row"><span class="coin">${t.s}</span><span class="pill ${up?'up':'dn'}">${t.side} ${LEV}x · ${((t.pct||SLTP)*100).toFixed(1)}%</span><span class="spacer"></span><b id="pl_${t.id}" class="price">—</b></div>
+   <div class="pills sm"><span class="pill">Entrada ${fp(t.entry)}</span><span class="pill dn">SL ${fp(t.sl)}</span><span class="pill up">TP ${fp(t.tp)}</span><span class="pill">Liq ≈ ${fp(t.liq)}</span></div>
+   <div class="row sm mut" style="margin-top:8px"><span>${dt(t.t0)} · ${t.reason} · score ${t.sc>0?'+':''}${t.sc}</span><span class="spacer"></span><span id="px_${t.id}"></span></div>
+   ${t.note?`<p class="sm" style="margin:8px 0 0">📝 ${esc(t.note)}</p>`:''}
+   <div class="row" style="margin-top:10px"><button class="btn" data-note="${t.id}">📝 Nota</button><button class="btn" data-chart="${t.s}">Gráfico</button><span class="spacer"></span><button class="btn" data-close="${t.id}">Fechar já</button></div></div>`}).join('');
+  const histH=BOT.closed.slice(0,60).map(t=>`<div class="it"><span class="t">${dt(t.t1).replace(' ','<br>')}</span><div style="flex:1"><div class="row"><b>${t.s}</b><span class="pill ${t.side==='LONG'?'up':'dn'}">${t.side}</span><span class="pill ${t.how.startsWith('TP')?'up':t.how.startsWith('SL')?'dn':''}">${t.how}</span><span class="spacer"></span><b class="${t.pnl>0?'up':'dn'}">${fmtPnl(t.pnl)}</b></div>
+   <div class="sm mut">${fp(t.entry)} → ${fp(t.exit)} · ${t.reason}</div>${t.note?`<div class="sm">📝 ${esc(t.note)}</div>`:''}<button class="btn sm" style="margin-top:6px;padding:5px 9px" data-note="${t.id}">📝 ${t.note?'Editar nota':'Nota'}</button></div></div>`).join('');
+  $('vBot').innerHTML=`<div class="card"><div class="row"><b>Bot paper trading</b><span class="spacer"></span><span class="sm mut">${cfg.bot?'ligado':'desligado'}</span><button class="tog ${cfg.bot?'on':''}" id="botTog" aria-label="Ligar bot"></button></div>
+   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Entra só em quebras de S/R confirmadas no fecho de 15m, a favor do viés (≥${cfg.botSc}). ${LEV}x · SL/TP ${cfg.botPct}% · margem $${cfg.margin}.</p>
+   <div class="stat"><div class="kv"><div class="k">Trades</div><div class="v">${st.n}</div></div><div class="kv"><div class="k">Acerto</div><div class="v">${st.n?(st.wr*100).toFixed(0)+'%':'—'}</div></div><div class="kv"><div class="k">P&L</div><div class="v ${st.pnl>0?'up':st.pnl<0?'dn':''}">${st.n?fmtPnl(st.pnl):'—'}</div></div>
+   <div class="kv"><div class="k">Profit factor</div><div class="v">${st.n?(st.pf===Infinity?'∞':st.pf.toFixed(2)):'—'}</div></div><div class="kv"><div class="k">Drawdown</div><div class="v dn">${st.n?'-$'+st.dd.toFixed(0):'—'}</div></div><div class="kv"><div class="k">Recusados</div><div class="v">${BOT.skipped}</div></div></div>
+   <div id="eq"></div>
+   <div class="row" style="margin-top:10px;gap:8px"><button class="btn acc" id="repBtn">Relatório para o Claude</button><span class="spacer"></span><button class="btn" id="closeAll">Fechar todas</button></div></div>
+   <h3>Abertas (${BOT.open.length}/${cfg.botMax})</h3>${openH||'<p class="mut sm">Sem posições abertas. O bot espera por uma quebra de S/R a favor do viés.</p>'}
+   <h3>Histórico</h3><div class="card feed">${histH||'<p class="mut sm">Ainda sem trades fechados.</p>'}</div>
+   <div class="card"><b>Filtros do bot</b>
+    <label class="sm mut" style="display:block;margin-top:8px">SL e TP do bot (% no preço do ativo)</label><input id="bPct" type="number" inputmode="decimal" step="0.1" min="0.5" max="5" value="${cfg.botPct}">
+    <p class="mut sm" style="margin:4px 0 0">Com fees, o ponto de equilíbrio é ${(((cfg.botPct/100)+FEE*2)/(2*cfg.botPct/100)*100).toFixed(1)}% de acerto. Cada trade guarda a % com que foi aberto.</p>
+    <label class="sm mut" style="display:block;margin-top:8px">Viés mínimo para entrar (1 a 5)</label><input id="bSc" type="number" inputmode="numeric" min="1" max="5" value="${cfg.botSc}">
+    <label class="sm mut" style="display:block;margin-top:8px">Máximo de posições ao mesmo tempo</label><input id="bMax" type="number" inputmode="numeric" min="1" max="19" value="${cfg.botMax}">
+    <div class="row" style="margin-top:12px"><span class="sm mut">Apagar todo o histórico do bot</span><span class="spacer"></span><button class="btn" id="botReset">${resetArm?'Toca outra vez para confirmar':'Apagar'}</button></div></div>
+   <p class="note">O bot só funciona com a app aberta. Ao reabrir, as posições abertas são verificadas com as velas de 15m: se o SL ou o TP foram tocados, o trade fecha nesse preço (se ambos na mesma vela, conta como SL). Cada dispositivo tem o seu próprio histórico.</p>`;
+  $('botTog').onclick=()=>{cfg.bot=!cfg.bot;save('cfg',cfg);render(true)};
+  $('bPct').onchange=e=>{cfg.botPct=Math.max(.5,Math.min(5,+e.target.value||1.5));save('cfg',cfg);render(true)};
+  $('bSc').onchange=e=>{cfg.botSc=Math.max(1,Math.min(5,+e.target.value||2));save('cfg',cfg)};
+  $('bMax').onchange=e=>{cfg.botMax=Math.max(1,Math.min(19,+e.target.value||5));save('cfg',cfg)};
+  $('repBtn').onclick=()=>{$('repTx').value=botReport();$('repDlg').classList.add('on')};
+  $('closeAll').onclick=()=>{for(const t of BOT.open.slice()){const p=S[t.s].price;if(p)botClose(t,p,'manual')}render(true)};
+  $('botReset').onclick=()=>{if(!resetArm){resetArm=true;render(true);setTimeout(()=>{resetArm=false;if(curView==='vBot')render(true)},4000);return}resetArm=false;BOT={open:[],closed:[],skipped:0,since:Date.now()};botSave();render(true)};
+  $('vBot').querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{const t=BOT.open.find(x=>x.id===b.dataset.close);if(t&&S[t.s].price){botClose(t,S[t.s].price,'manual');render(true)}});
+  $('vBot').querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>openNote(b.dataset.note));
+  $('vBot').querySelectorAll('[data-chart]').forEach(b=>b.onclick=()=>openSheet(b.dataset.chart));
+  drawEq();botLive();
+}
+let resetArm=false;
+function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function botLive(){for(const t of BOT.open){const p=S[t.s].price;const el=$('pl_'+t.id);if(!el||!p)continue;const v=pnlOf(t,p);el.textContent=fmtPnl(v);el.className='price '+(v>=0?'up':'dn');
+  const l=t.side==='LONG';const dSL=Math.abs(p/t.sl-1)*100,dTP=Math.abs(t.tp/p-1)*100;const x=$('px_'+t.id);if(x)x.textContent=`${fp(p)} · SL a ${dSL.toFixed(2)}% · TP a ${dTP.toFixed(2)}%`}}
+let EQ=null;
+function drawEq(){const box=$('eq');if(!box)return;if(EQ){try{EQ.remove()}catch(e){}EQ=null}
+  const C=BOT.closed.slice().reverse();if(C.length<2||typeof LightweightCharts==='undefined'){box.style.display='none';return}
+  box.style.display='block';let eq=0;const pts=[];let lastT=0;for(const t of C){eq+=t.pnl;let tt=Math.floor(t.t1/1000);if(tt<=lastT)tt=lastT+1;lastT=tt;pts.push({time:tt,value:+eq.toFixed(2)})}
+  EQ=LightweightCharts.createChart(box,{width:box.clientWidth,height:140,layout:{background:{type:'solid',color:'#181c25'},textColor:'#8a93a6',fontSize:10},grid:{vertLines:{visible:false},horzLines:{color:'#232836'}},rightPriceScale:{borderVisible:false},timeScale:{visible:false},handleScroll:false,handleScale:false,crosshair:{mode:0}});
+  const up=eq>=0;const a=EQ.addAreaSeries({lineColor:up?'#22c55e':'#ef4444',topColor:up?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)',bottomColor:'rgba(0,0,0,0)',lineWidth:2,priceFormat:{type:'price',precision:2,minMove:.01}});a.setData(pts);EQ.timeScale().fitContent()}
+let noteId=null;
+function findTrade(id){return BOT.open.find(t=>t.id===id)||BOT.closed.find(t=>t.id===id)}
+function openNote(id){const t=findTrade(id);if(!t)return;noteId=id;$('noteTtl').textContent=`Nota · ${t.s} ${t.side} · ${dt(t.t0)}`;$('noteTx').value=t.note||'';$('noteDlg').classList.add('on')}
+$('noteX').onclick=()=>$('noteDlg').classList.remove('on');
+$('noteOk').onclick=()=>{const t=findTrade(noteId);if(t){t.note=$('noteTx').value.trim();botSave()}$('noteDlg').classList.remove('on');render(true)};
+$('noteDlg').onclick=e=>{if(e.target.id==='noteDlg')$('noteDlg').classList.remove('on')};
+$('repX').onclick=()=>$('repDlg').classList.remove('on');
+$('repDlg').onclick=e=>{if(e.target.id==='repDlg')$('repDlg').classList.remove('on')};
+$('repCp').onclick=async()=>{const tx=$('repTx');try{await navigator.clipboard.writeText(tx.value);toast('Relatório copiado — cola na conversa com o Claude')}catch(e){tx.focus();tx.select();try{document.execCommand('copy');toast('Relatório copiado')}catch(_){toast('Seleciona o texto e copia manualmente')}}};
+
 function renderCfg(){
   $('vCfg').innerHTML=`<div class="card"><b>O teu setup</b><p class="mut sm">Alavancagem ${LEV}x · SL e TP a ${SLTP*100}% no preço do ativo</p>
    <label class="sm mut">Margem por trade ($)</label><input id="mIn" type="number" inputmode="decimal" value="${cfg.margin}">
@@ -351,9 +501,17 @@ function fillChart(full){
   if(full||last.t!==CH.lastT){CH.candle.setData(cd);CH.vol.setData(vd);CH.e20.setData(emaSeries(c,20));CH.e50.setData(emaSeries(c,50));if(CH.vw)CH.vw.setData(vwapSeries(c))}
   else{CH.candle.update(cd[cd.length-1]);CH.vol.update(vd[vd.length-1])}
   CH.lastT=last.t;
-  const key=JSON.stringify(s.lv);if(full||key!==CH.key){CH.key=key;CH.lines.forEach(l=>CH.candle.removePriceLine(l));CH.lines=[];
+  const tr=BOT.open.concat(BOT.closed).filter(t=>t.s===s.s);
+  const key=JSON.stringify(s.lv)+'|'+cfg.ctf+'|'+tr.map(t=>t.id+(t.exit||'')).join();if(full||key!==CH.key){CH.key=key;CH.lines.forEach(l=>CH.candle.removePriceLine(l));CH.lines=[];
     s.lv.res.forEach(p=>CH.lines.push(CH.candle.createPriceLine({price:p,color:'rgba(239,68,68,.7)',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'R'})));
-    s.lv.sup.forEach(p=>CH.lines.push(CH.candle.createPriceLine({price:p,color:'rgba(34,197,94,.7)',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'S'})))}
+    s.lv.sup.forEach(p=>CH.lines.push(CH.candle.createPriceLine({price:p,color:'rgba(34,197,94,.7)',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'S'})));
+    for(const t of BOT.open.filter(t=>t.s===s.s)){CH.lines.push(CH.candle.createPriceLine({price:t.entry,color:'#cbd5e1',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:'🤖 '+t.side}));
+      CH.lines.push(CH.candle.createPriceLine({price:t.sl,color:'#ef4444',lineWidth:2,lineStyle:0,axisLabelVisible:true,title:'SL'}));
+      CH.lines.push(CH.candle.createPriceLine({price:t.tp,color:'#22c55e',lineWidth:2,lineStyle:0,axisLabelVisible:true,title:'TP'}))}
+    const tfms=cfg.ctf==='1m'?M1:M15*TFK[cfg.ctf];const first=c[0].t;const mk=[];
+    for(const t of tr){const b=Math.floor(t.t0/tfms)*tfms;if(b>=first)mk.push({time:b/1000,position:t.side==='LONG'?'belowBar':'aboveBar',color:t.side==='LONG'?'#22c55e':'#ef4444',shape:t.side==='LONG'?'arrowUp':'arrowDown',text:'🤖'});
+      if(t.t1){const e=Math.floor((t.t1-1)/tfms)*tfms;if(e>=first)mk.push({time:e/1000,position:'inBar',color:t.pnl>0?'#86efac':'#fca5a5',shape:'circle',text:t.how.split(' ')[0]})}}
+    mk.sort((a,b)=>a.time-b.time);try{CH.candle.setMarkers(mk)}catch(e){}}
 }
 addEventListener('resize',()=>{if(CH.chart&&$('chart'))CH.chart.applyOptions({width:$('chart').clientWidth})});
 function renderSheet(){
