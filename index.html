@@ -135,7 +135,7 @@ const M15=900000;
 const S={}; const SYM2C={};
 COINS.forEach(c=>{S[c.s]={...c,price:null,ch24:null,funding:null,oi:null,turn:null,hi:null,lo:null,rank:null,mcap:null,c15:[],lv:{sup:[],res:[]},ind:null,liq:[],src:null};
   [c.s+'USDT',...(c.alt||[])].forEach(x=>SYM2C[x]=c.s);});
-const cfg=load('cfg',{botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
+const cfg=load('cfg',{botSlip:0.05,botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
 let alerts=load('alerts',[]); let unseen=0;
 const liqAll=[]; // {t,s,side,usd}
 
@@ -263,7 +263,10 @@ if(!Array.isArray(BOT.open))BOT={open:[],closed:[],skipped:0,since:Date.now()};
 function botSave(){save('bot',BOT)}
 function plan(side,p,k=SLTP){const l=side==='LONG';return {entry:p,sl:l?p*(1-k):p*(1+k),tp:l?p*(1+k):p*(1-k),liq:l?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR)}}
 function planTxt(side,p){const q=plan(side,p);return `Plano ${side}: entrada ${fp(q.entry)} · SL ${fp(q.sl)} · TP ${fp(q.tp)} · liq ≈ ${fp(q.liq)}`}
-function pnlOf(t,exit){const pos=t.margin*LEV;const r=t.side==='LONG'?exit/t.entry-1:1-exit/t.entry;return pos*r-pos*FEE*2}
+// slippage: entrada a mercado e SL/fecho manual pioram o preço; TP é ordem limite (sem slippage)
+function pnlOf(t,exit,how){const pos=t.margin*LEV;const sl=t.slip||0;const L=t.side==='LONG';
+  const en=t.fill||t.entry;const ex=(how&&how.startsWith('TP'))?exit:(L?exit*(1-sl):exit*(1+sl));
+  const r=L?ex/en-1:1-ex/en;return pos*r-pos*FEE*2}
 // decide se o bot entra numa quebra; devolve texto com a decisão
 function botOnBreak(s,dir,lvl,close){
   const side=dir>0?'LONG':'SHORT';const i=s.ind;
@@ -282,14 +285,14 @@ function botOnBreak(s,dir,lvl,close){
   if(s.funding!=null&&side==='LONG'&&s.funding>.0005)why.push('funding muito alto');
   if(s.funding!=null&&side==='SHORT'&&s.funding<-.0005)why.push('funding muito negativo');
   if(why.length){BOT.skipped++;botSave();return 'bot ficou de fora: '+why.join(', ')}
-  const pct=(cfg.botPct||1.5)/100;const q=plan(side,close,pct);
-  const t={pct,id:Date.now().toString(36)+s.s,s:s.s,side,...q,margin:cfg.margin,t0:Date.now(),lvl,sc:i.sc,r15:i.r15!=null?Math.round(i.r15):null,
+  const pct=(cfg.botPct||1.5)/100;const q=plan(side,close,pct);const slip=(cfg.botSlip??0.05)/100;
+  const t={pct,slip,fill:side==='LONG'?close*(1+slip):close*(1-slip),id:Date.now().toString(36)+s.s,s:s.s,side,...q,margin:cfg.margin,t0:Date.now(),lvl,sc:i.sc,r15:i.r15!=null?Math.round(i.r15):null,
     reason:`${dir>0?'Rompeu R':'Perdeu S'} ${num(lvl)}`,note:''};
   BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);return `🤖 bot abriu ${side} @ ${fp(close)}`;
 }
 function botClose(t,exit,how,when){
   const i=BOT.open.indexOf(t);if(i<0)return;BOT.open.splice(i,1);
-  const c={...t,exit,t1:when||Date.now(),how,pnl:pnlOf(t,exit)};BOT.closed.unshift(c);if(BOT.closed.length>500)BOT.closed.length=500;botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
+  const c={...t,exit,t1:when||Date.now(),how,pnl:pnlOf(t,exit,how)};BOT.closed.unshift(c);if(BOT.closed.length>500)BOT.closed.length=500;botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
   pushAlert({t:c.t1,s:t.s,type:'bot',dir:c.pnl>0?1:-1,txt:`🤖 ${t.side} fechado em ${how} @ ${fp(exit)} · ${fmtPnl(c.pnl)}`},true);
 }
 function num(x){return x==null?'':+(+x).toPrecision(6)}
@@ -317,7 +320,7 @@ function botReport(){
   const side=x=>botStats(C.filter(t=>t.side===x));const sl=side('LONG'),ss=side('SHORT');
   const L=[];L.push('RELATÓRIO BOT — CRIPTO LIVE (paper trading)');
   L.push(`Gerado: ${dt(Date.now())} · desde ${dt(BOT.since)}`);
-  L.push(`Setup atual do bot: ${LEV}x · SL/TP ${cfg.botPct}% · margem atual $${cfg.margin} · viés mínimo ${cfg.botSc} · máx ${cfg.botMax} posições`);
+  L.push(`Setup atual do bot: ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem atual $${cfg.margin} · viés mínimo ${cfg.botSc} · máx ${cfg.botMax} posições`);
   L.push(`Fechados: ${st.n} · acerto ${(st.wr*100).toFixed(0)}% · P&L ${fmtPnl(st.pnl)} · PF ${st.pf===Infinity?'∞':st.pf.toFixed(2)} · drawdown máx -$${st.dd.toFixed(2)}`);
   L.push(`Ganho médio ${fmtPnl(st.avgW)} · perda média -$${st.avgL.toFixed(2)} · melhor ${fmtPnl(st.best)} · pior ${fmtPnl(st.worst)}`);
   L.push(`LONG: ${sl.n} trades, ${(sl.wr*100).toFixed(0)}%, ${fmtPnl(sl.pnl)} | SHORT: ${ss.n} trades, ${(ss.wr*100).toFixed(0)}%, ${fmtPnl(ss.pnl)}`);
@@ -325,9 +328,9 @@ function botReport(){
   L.push('Por SL/TP: '+Object.entries(byP).map(([k,v])=>{const x=botStats(v);return `${k}: ${x.n}t ${(x.wr*100).toFixed(0)}% ${fmtPnl(x.pnl)}`}).join(' | '));
   L.push(`Sinais recusados pelos filtros: ${BOT.skipped} · posições abertas: ${BOT.open.length}`);
   L.push('Por moeda: '+Object.entries(by).map(([k,v])=>{const x=botStats(v);return `${k} ${x.n}t ${(x.wr*100).toFixed(0)}% ${fmtPnl(x.pnl)}`}).join(' | '));
-  if(BOT.open.length){L.push('');L.push('ABERTAS:');for(const t of BOT.open){const p=S[t.s].price;L.push(`${dt(t.t0)},${t.s},${t.side},${num(t.entry)},atual ${num(p)},${p?fmtPnl(pnlOf(t,p)):'?'},score ${t.sc},rsi15 ${t.r15},${t.reason}${t.note?',nota: '+t.note.replace(/[\n,]/g,' '):''}`)}}
-  L.push('');L.push('data_entrada,data_saida,moeda,lado,sl_tp_pct,entrada,saida,resultado,pnl_usd,score,rsi15,motivo,nota');
-  for(const t of C)L.push([dt(t.t0),dt(t.t1),t.s,t.side,((t.pct||SLTP)*100).toFixed(1),num(t.entry),num(t.exit),t.how,t.pnl.toFixed(2),t.sc,t.r15,t.reason,(t.note||'').replace(/[\n,]/g,' ')].join(','));
+  if(BOT.open.length){L.push('');L.push('ABERTAS:');for(const t of BOT.open){const p=S[t.s].price;L.push(`${dt(t.t0)},${t.s},${t.side},${num(t.entry)},atual ${num(p)},${p?fmtPnl(pnlOf(t,p,'manual')):'?'},score ${t.sc},rsi15 ${t.r15},${t.reason}${t.note?',nota: '+t.note.replace(/[\n,]/g,' '):''}`)}}
+  L.push('');L.push('data_entrada,data_saida,moeda,lado,sl_tp_pct,slip_pct,entrada,saida,resultado,pnl_usd,score,rsi15,motivo,nota');
+  for(const t of C)L.push([dt(t.t0),dt(t.t1),t.s,t.side,((t.pct||SLTP)*100).toFixed(1),((t.slip||0)*100).toFixed(2),num(t.entry),num(t.exit),t.how,t.pnl.toFixed(2),t.sc,t.r15,t.reason,(t.note||'').replace(/[\n,]/g,' ')].join(','));
   return L.join('\n');
 }
 
@@ -381,7 +384,7 @@ function renderBot(){
   const histH=BOT.closed.slice(0,60).map(t=>`<div class="it"><span class="t">${dt(t.t1).replace(' ','<br>')}</span><div style="flex:1"><div class="row"><b>${t.s}</b><span class="pill ${t.side==='LONG'?'up':'dn'}">${t.side}</span><span class="pill ${t.how.startsWith('TP')?'up':t.how.startsWith('SL')?'dn':''}">${t.how}</span><span class="spacer"></span><b class="${t.pnl>0?'up':'dn'}">${fmtPnl(t.pnl)}</b></div>
    <div class="sm mut">${fp(t.entry)} → ${fp(t.exit)} · ${t.reason}</div>${t.note?`<div class="sm">📝 ${esc(t.note)}</div>`:''}<button class="btn sm" style="margin-top:6px;padding:5px 9px" data-note="${t.id}">📝 ${t.note?'Editar nota':'Nota'}</button></div></div>`).join('');
   $('vBot').innerHTML=`<div class="card"><div class="row"><b>Bot paper trading</b><span class="spacer"></span><span class="sm mut">${cfg.bot?'ligado':'desligado'}</span><button class="tog ${cfg.bot?'on':''}" id="botTog" aria-label="Ligar bot"></button></div>
-   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Entra só em quebras de S/R confirmadas no fecho de 15m, a favor do viés (≥${cfg.botSc}). ${LEV}x · SL/TP ${cfg.botPct}% · margem $${cfg.margin}.</p>
+   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Entra só em quebras de S/R confirmadas no fecho de 15m, a favor do viés (≥${cfg.botSc}). ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin}.</p>
    <div class="stat"><div class="kv"><div class="k">Trades</div><div class="v">${st.n}</div></div><div class="kv"><div class="k">Acerto</div><div class="v">${st.n?(st.wr*100).toFixed(0)+'%':'—'}</div></div><div class="kv"><div class="k">P&L</div><div class="v ${st.pnl>0?'up':st.pnl<0?'dn':''}">${st.n?fmtPnl(st.pnl):'—'}</div></div>
    <div class="kv"><div class="k">Profit factor</div><div class="v">${st.n?(st.pf===Infinity?'∞':st.pf.toFixed(2)):'—'}</div></div><div class="kv"><div class="k">Drawdown</div><div class="v dn">${st.n?'-$'+st.dd.toFixed(0):'—'}</div></div><div class="kv"><div class="k">Recusados</div><div class="v">${BOT.skipped}</div></div></div>
    <div id="eq"></div>
@@ -390,13 +393,16 @@ function renderBot(){
    <h3>Histórico</h3><div class="card feed">${histH||'<p class="mut sm">Ainda sem trades fechados.</p>'}</div>
    <div class="card"><b>Filtros do bot</b>
     <label class="sm mut" style="display:block;margin-top:8px">SL e TP do bot (% no preço do ativo)</label><input id="bPct" type="number" inputmode="decimal" step="0.1" min="0.5" max="5" value="${cfg.botPct}">
-    <p class="mut sm" style="margin:4px 0 0">Com fees, o ponto de equilíbrio é ${(((cfg.botPct/100)+FEE*2)/(2*cfg.botPct/100)*100).toFixed(1)}% de acerto. Cada trade guarda a % com que foi aberto.</p>
+    <p class="mut sm" style="margin:4px 0 0">Com fees e slippage, o ponto de equilíbrio é ${(((cfg.botPct/100)+FEE*2+cfg.botSlip/100*1.5)/(2*cfg.botPct/100)*100).toFixed(1)}% de acerto. Cada trade guarda a % com que foi aberto.</p>
+    <label class="sm mut" style="display:block;margin-top:8px">Slippage estimado por execução (%)</label><input id="bSlip" type="number" inputmode="decimal" step="0.01" min="0" max="0.5" value="${cfg.botSlip}">
+    <p class="mut sm" style="margin:4px 0 0">Aplicado na entrada e no SL/fecho manual (ordens a mercado). O TP conta como ordem limite, sem slippage.</p>
     <label class="sm mut" style="display:block;margin-top:8px">Viés mínimo para entrar (1 a 5)</label><input id="bSc" type="number" inputmode="numeric" min="1" max="5" value="${cfg.botSc}">
     <label class="sm mut" style="display:block;margin-top:8px">Máximo de posições ao mesmo tempo</label><input id="bMax" type="number" inputmode="numeric" min="1" max="19" value="${cfg.botMax}">
     <div class="row" style="margin-top:12px"><span class="sm mut">Apagar todo o histórico do bot</span><span class="spacer"></span><button class="btn" id="botReset">${resetArm?'Toca outra vez para confirmar':'Apagar'}</button></div></div>
    <p class="note">O bot só funciona com a app aberta. Ao reabrir, as posições abertas são verificadas com as velas de 15m: se o SL ou o TP foram tocados, o trade fecha nesse preço (se ambos na mesma vela, conta como SL). Cada dispositivo tem o seu próprio histórico.</p>`;
   $('botTog').onclick=()=>{cfg.bot=!cfg.bot;save('cfg',cfg);render(true)};
   $('bPct').onchange=e=>{cfg.botPct=Math.max(.5,Math.min(5,+e.target.value||1.5));save('cfg',cfg);render(true)};
+  $('bSlip').onchange=e=>{cfg.botSlip=Math.max(0,Math.min(.5,+e.target.value||0));save('cfg',cfg);render(true)};
   $('bSc').onchange=e=>{cfg.botSc=Math.max(1,Math.min(5,+e.target.value||2));save('cfg',cfg)};
   $('bMax').onchange=e=>{cfg.botMax=Math.max(1,Math.min(19,+e.target.value||5));save('cfg',cfg)};
   $('repBtn').onclick=()=>{$('repTx').value=botReport();$('repDlg').classList.add('on')};
@@ -409,7 +415,7 @@ function renderBot(){
 }
 let resetArm=false;
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function botLive(){for(const t of BOT.open){const p=S[t.s].price;const el=$('pl_'+t.id);if(!el||!p)continue;const v=pnlOf(t,p);el.textContent=fmtPnl(v);el.className='price '+(v>=0?'up':'dn');
+function botLive(){for(const t of BOT.open){const p=S[t.s].price;const el=$('pl_'+t.id);if(!el||!p)continue;const v=pnlOf(t,p,'manual');el.textContent=fmtPnl(v);el.className='price '+(v>=0?'up':'dn');
   const l=t.side==='LONG';const dSL=Math.abs(p/t.sl-1)*100,dTP=Math.abs(t.tp/p-1)*100;const x=$('px_'+t.id);if(x)x.textContent=`${fp(p)} · SL a ${dSL.toFixed(2)}% · TP a ${dTP.toFixed(2)}%`}}
 let EQ=null;
 function drawEq(){const box=$('eq');if(!box)return;if(EQ){try{EQ.remove()}catch(e){}EQ=null}
