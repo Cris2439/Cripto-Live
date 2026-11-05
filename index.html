@@ -167,7 +167,7 @@ function compute(s){
   const vwap=vv>0?pv/vv:null;
   // S/R a partir de pivots 1h (últimas ~120h)
   const lv=cluster(pivots(h1.slice(-120),3)).sort((a,b)=>b.n-a.n||0);
-  const levels=lv.map(x=>x.p);
+  const levels=lv.map(x=>x.p);s.lvAll=levels;
   s.lv={res:levels.filter(p=>p>price*1.001).sort((a,b)=>a-b).slice(0,3),sup:levels.filter(p=>p<price*.999).sort((a,b)=>b-a).slice(0,3)};
   // Pontuação de viés
   let sc=0; const why=[];
@@ -246,9 +246,11 @@ function onMsg(m){
 }
 // Alerta só em quebras de S/R confirmadas no fecho de vela de 15m
 function findBreak(s,x){
+  // usa todos os níveis (não só os 3 mais próximos), porque durante a vela o preço já pode ter passado o nível
   const c=s.c15;if(c.length<3)return null;const prev=c[c.length-2].c;
-  const r=s.lv.res.filter(r=>prev<=r&&x.c>r*1.001).sort((a,b)=>b-a)[0];if(r)return {dir:1,lvl:r};
-  const p=s.lv.sup.filter(p=>prev>=p&&x.c<p*.999).sort((a,b)=>a-b)[0];if(p)return {dir:-1,lvl:p};
+  const L=(s.lvAll||[]).filter(l=>Math.abs(l/x.c-1)<.05);
+  const r=L.filter(r=>prev<=r&&x.c>r*1.001).sort((a,b)=>b-a)[0];if(r)return {dir:1,lvl:r};
+  const p=L.filter(p=>prev>=p&&x.c<p*.999).sort((a,b)=>a-b)[0];if(p)return {dir:-1,lvl:p};
   return null;
 }
 function pushAlert(a,loud){alerts.unshift(a);if(alerts.length>200)alerts.length=200;save('alerts',alerts);
