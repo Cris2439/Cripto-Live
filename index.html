@@ -264,6 +264,7 @@ let BOT=load('bot',{open:[],closed:[],skipped:0,since:Date.now()});
 if(!Array.isArray(BOT.open))BOT={open:[],closed:[],skipped:0,since:Date.now()};
 function botSave(){save('bot',BOT)}
 if(!BOT.v2){BOT.v2=Date.now();save('bot',BOT)}
+if(!BOT.v3){BOT.v3=Date.now();save('bot',BOT)}
 function plan(side,p,k=SLTP){const l=side==='LONG';return {entry:p,sl:l?p*(1-k):p*(1+k),tp:l?p*(1+k):p*(1-k),liq:l?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR)}}
 function planTxt(side,p){const q=plan(side,p);return `Plano ${side}: entrada ${fp(q.entry)} · SL ${fp(q.sl)} · TP ${fp(q.tp)} · liq ≈ ${fp(q.liq)}`}
 // slippage: entrada a mercado e SL/fecho manual pioram o preço; TP é ordem limite (sem slippage)
@@ -271,14 +272,16 @@ function pnlOf(t,exit,how){const pos=t.margin*LEV;const sl=t.slip||0;const L=t.s
   const en=t.fill||t.entry;const ex=(how&&how.startsWith('TP'))?exit:(L?exit*(1-sl):exit*(1+sl));
   const r=L?ex/en-1:1-ex/en;return pos*r-pos*FEE*2}
 // decide se o bot entra numa quebra; devolve texto com a decisão
-const BOTS={A:'Quebra',B:'Reversão'};
+const BOTS={A:'Quebra',B:'Reversão',C:'Reversão c/ viés'};
+const BOTS_ON=['B','C']; // A desligado a 9 nov 2026 (37 trades ~35% de acerto)
 function botOf(t){return t.bot||'v1'}
 // Dois bots em paralelo, sobre o mesmo sinal: A segue a quebra, B aposta na quebra falsa (lado contrário)
 function botOnBreak(s,dir,lvl,close){
   if(!cfg.bot)return 'bots desligados';
-  return ['A','B'].map(b=>tryBot(b,s,dir,lvl,close)).join('\n');
+  return BOTS_ON.map(b=>tryBot(b,s,dir,lvl,close)).join('\n');
 }
 function tryBot(b,s,dir,lvl,close){
+  // B e C: lado contrário da quebra
   const side=b==='A'?(dir>0?'LONG':'SHORT'):(dir>0?'SHORT':'LONG');const i=s.ind;const now=Date.now();
   const mine=x=>botOf(x)===b;const open=BOT.open.filter(mine);const why=[];
   if(open.some(t=>t.s===s.s))why.push('já tem posição nesta moeda');
@@ -294,6 +297,10 @@ function tryBot(b,s,dir,lvl,close){
     if(side==='SHORT'&&i.sc>-cfg.botSc)why.push(`viés ${i.sc>0?'+':''}${i.sc} insuficiente para SHORT`);
     if(side==='LONG'&&i.r15>65)why.push(`RSI15 ${Math.round(i.r15)} alto para LONG`);
     if(side==='SHORT'&&i.r15<35)why.push(`RSI15 ${Math.round(i.r15)} baixo para SHORT`);
+  }
+  else if(b==='C'){ // só quando o viés está a favor da reversão, ou seja, a quebra vai contra a tendência
+    if(side==='LONG'&&!(i.sc>0))why.push(`viés ${i.sc>0?'+':''}${i.sc} não favorece LONG`);
+    if(side==='SHORT'&&!(i.sc<0))why.push(`viés ${i.sc>0?'+':''}${i.sc} não favorece SHORT`);
   }
   if(s.funding!=null&&side==='LONG'&&s.funding>.0005)why.push('funding muito alto');
   if(s.funding!=null&&side==='SHORT'&&s.funding<-.0005)why.push('funding muito negativo');
@@ -332,10 +339,10 @@ function statLine(list){const x=botStats(list);return `${x.n} trades · acerto $
 function botReport(){
   const C=BOT.closed;const L=[];
   L.push('RELATÓRIO BOTS — CRIPTO LIVE (paper trading)');
-  L.push(`Gerado: ${dt(Date.now())} · histórico desde ${dt(BOT.since)}${BOT.v2?' · bots A/B desde '+dt(BOT.v2):''}`);
+  L.push(`Gerado: ${dt(Date.now())} · histórico desde ${dt(BOT.since)}${BOT.v2?' · bots A/B desde '+dt(BOT.v2):''}${BOT.v3?' · bot C desde '+dt(BOT.v3):''}`);
   L.push(`Setup: ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin} · viés mínimo A ${cfg.botSc} · máx ${cfg.botMax} posições/bot, 3 no mesmo sentido, 2 entradas/vela, pausa 4h após SL, sem repetir nível 24h`);
-  L.push('A = Quebra (segue a quebra; SHORT só com RSI15≥35, LONG só com RSI15≤65) · B = Reversão (lado contrário da quebra, sem filtro de viés)');
-  for(const b of ['A','B','v1']){const list=C.filter(t=>botOf(t)===b);const op=BOT.open.filter(t=>botOf(t)===b);if(!list.length&&!op.length&&b==='v1')continue;
+  L.push('A = Quebra (desligado desde 9/11) · B = Reversão (lado contrário da quebra, sem filtro de viés) · C = Reversão só com o viés a favor (quebra contra a tendência)');
+  for(const b of ['A','B','C','v1']){const list=C.filter(t=>botOf(t)===b);const op=BOT.open.filter(t=>botOf(t)===b);if(!list.length&&!op.length&&(b==='v1'||b==='C'&&false))continue;
     L.push('');L.push(`== BOT ${b}${b==='v1'?' (versão antiga, antes dos filtros)':' — '+BOTS[b]} ==`);
     L.push(statLine(list));
     const x=botStats(list);L.push(`Ganho médio ${fmtPnl(x.avgW)} · perda média -$${x.avgL.toFixed(2)} · recusados ${b==='v1'?BOT.skipped:(BOT['skip'+b]||0)} · abertas ${op.length}`);
@@ -390,10 +397,10 @@ function renderAlerts(){
   $('clrA').onclick=()=>{alerts=[];save('alerts',alerts);render(true)};
 }
 function renderBot(){
-  const SA=botStats(BOT.closed.filter(t=>botOf(t)==='A')),SB=botStats(BOT.closed.filter(t=>botOf(t)==='B')),OLD=BOT.closed.filter(t=>botOf(t)==='v1');
-  const pf=x=>x.n?(x.pf===Infinity?'∞':x.pf.toFixed(2)):'—';
-  const row=(k,a,b)=>`<div class="lvl"><span class="mut">${k}</span><b>${a}</b><b>${b}</b></div>`;
-  const badge=t=>`<span class="pill ${botOf(t)==='A'?'acc':botOf(t)==='B'?'warn':''}">${botOf(t)==='v1'?'v1':'Bot '+botOf(t)}</span>`;
+  const ST={A:botStats(BOT.closed.filter(t=>botOf(t)==='A')),B:botStats(BOT.closed.filter(t=>botOf(t)==='B')),C:botStats(BOT.closed.filter(t=>botOf(t)==='C'))},OLD=BOT.closed.filter(t=>botOf(t)==='v1');
+  const pf=x=>x.n?(x.pf===Infinity?'∞':x.pf.toFixed(2)):'—';const KS=['A','B','C'];
+  const row=(k,f)=>`<div class="lvl" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;text-align:right"><span class="mut" style="text-align:left">${k}</span>${KS.map(b=>`<b style="${b==='A'?'opacity:.45':''}">${f(b)}</b>`).join('')}</div>`;
+  const badge=t=>`<span class="pill ${botOf(t)==='A'?'acc':botOf(t)==='B'?'warn':botOf(t)==='C'?'up':''}">${botOf(t)==='v1'?'v1':'Bot '+botOf(t)}</span>`;
   const openH=BOT.open.map(t=>{const up=t.side==='LONG';return `<div class="card tr ${up?'up':'dn'}" data-id="${t.id}"><div class="row"><span class="coin">${t.s}</span>${badge(t)}<span class="pill ${up?'up':'dn'}">${t.side} ${LEV}x · ${((t.pct||SLTP)*100).toFixed(1)}%</span><span class="spacer"></span><b id="pl_${t.id}" class="price">—</b></div>
    <div class="pills sm"><span class="pill">Entrada ${fp(t.entry)}</span><span class="pill dn">SL ${fp(t.sl)}</span><span class="pill up">TP ${fp(t.tp)}</span><span class="pill">Liq ≈ ${fp(t.liq)}</span></div>
    <div class="row sm mut" style="margin-top:8px"><span>${dt(t.t0)} · ${t.reason} · score ${t.sc>0?'+':''}${t.sc}</span><span class="spacer"></span><span id="px_${t.id}"></span></div>
@@ -402,13 +409,13 @@ function renderBot(){
   const histH=BOT.closed.slice(0,60).map(t=>`<div class="it"><span class="t">${dt(t.t1).replace(' ','<br>')}</span><div style="flex:1"><div class="row"><b>${t.s}</b>${badge(t)}<span class="pill ${t.side==='LONG'?'up':'dn'}">${t.side}</span><span class="pill ${t.how.startsWith('TP')?'up':t.how.startsWith('SL')?'dn':''}">${t.how}</span><span class="spacer"></span><b class="${t.pnl>0?'up':'dn'}">${fmtPnl(t.pnl)}</b></div>
    <div class="sm mut">${fp(t.entry)} → ${fp(t.exit)} · ${t.reason}</div>${t.note?`<div class="sm">📝 ${esc(t.note)}</div>`:''}<button class="btn sm" style="margin-top:6px;padding:5px 9px" data-note="${t.id}">📝 ${t.note?'Editar nota':'Nota'}</button></div></div>`).join('');
   $('vBot').innerHTML=`<div class="card"><div class="row"><b>Bot paper trading</b><span class="spacer"></span><span class="sm mut">${cfg.bot?'ligado':'desligado'}</span><button class="tog ${cfg.bot?'on':''}" id="botTog" aria-label="Ligar bot"></button></div>
-   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Dois bots sobre o mesmo sinal (quebra de S/R no fecho de 15m): <b>A · Quebra</b> segue a quebra a favor do viés (≥${cfg.botSc}); <b>B · Reversão</b> entra ao contrário. ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin}.</p>
+   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Sinal: quebra de S/R no fecho de 15m. <b style="color:var(--warn)">B · Reversão</b> entra ao contrário da quebra; <b style="color:var(--up)">C</b> faz o mesmo mas só quando o viés favorece a reversão (quebra contra a tendência). <span style="opacity:.6">A · Quebra desligado.</span> ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin}.</p>
    <div class="card" style="margin:10px 0 0;padding:4px 12px;background:var(--card2)">
-    <div class="lvl"><span></span><b style="color:var(--acc)">A · Quebra</b><b style="color:var(--warn)">B · Reversão</b></div>
-    ${row('Trades',SA.n,SB.n)}${row('Acerto',SA.n?(SA.wr*100).toFixed(0)+'%':'—',SB.n?(SB.wr*100).toFixed(0)+'%':'—')}
-    ${row('P&L',`<span class="${SA.pnl>0?'up':SA.pnl<0?'dn':''}">${SA.n?fmtPnl(SA.pnl):'—'}</span>`,`<span class="${SB.pnl>0?'up':SB.pnl<0?'dn':''}">${SB.n?fmtPnl(SB.pnl):'—'}</span>`)}
-    ${row('Profit factor',pf(SA),pf(SB))}${row('Drawdown',SA.n?'-$'+SA.dd.toFixed(0):'—',SB.n?'-$'+SB.dd.toFixed(0):'—')}
-    ${row('Recusados',BOT.skipA||0,BOT.skipB||0)}${row('Abertas',BOT.open.filter(t=>botOf(t)==='A').length,BOT.open.filter(t=>botOf(t)==='B').length)}</div>
+    <div class="lvl" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;text-align:right"><span></span><b style="color:var(--acc);opacity:.45">A</b><b style="color:var(--warn)">B</b><b style="color:var(--up)">C</b></div>
+    ${row('Trades',b=>ST[b].n)}${row('Acerto',b=>ST[b].n?(ST[b].wr*100).toFixed(0)+'%':'—')}
+    ${row('P&L',b=>`<span class="${ST[b].pnl>0?'up':ST[b].pnl<0?'dn':''}">${ST[b].n?fmtPnl(ST[b].pnl):'—'}</span>`)}
+    ${row('Profit factor',b=>pf(ST[b]))}${row('Drawdown',b=>ST[b].n?'-$'+ST[b].dd.toFixed(0):'—')}
+    ${row('Recusados',b=>BOT['skip'+b]||0)}${row('Abertas',b=>BOT.open.filter(t=>botOf(t)===b).length)}</div>
    ${OLD.length?`<p class="mut sm" style="margin:8px 0 0">Versão antiga (v1, sem filtros): ${statLine(OLD)}</p>`:''}
    <div id="eq"></div>
    <div class="row" style="margin-top:10px;gap:8px"><button class="btn acc" id="repBtn">Relatório para o Claude</button><span class="spacer"></span><button class="btn" id="closeAll">Fechar todas</button></div></div>
@@ -430,7 +437,7 @@ function renderBot(){
   $('bMax').onchange=e=>{cfg.botMax=Math.max(1,Math.min(19,+e.target.value||5));save('cfg',cfg)};
   $('repBtn').onclick=()=>{$('repTx').value=botReport();$('repDlg').classList.add('on')};
   $('closeAll').onclick=()=>{for(const t of BOT.open.slice()){const p=S[t.s].price;if(p)botClose(t,p,'manual')}render(true)};
-  $('botReset').onclick=()=>{if(!resetArm){resetArm=true;render(true);setTimeout(()=>{resetArm=false;if(curView==='vBot')render(true)},4000);return}resetArm=false;BOT={open:[],closed:[],skipped:0,since:Date.now(),v2:Date.now()};botSave();render(true)};
+  $('botReset').onclick=()=>{if(!resetArm){resetArm=true;render(true);setTimeout(()=>{resetArm=false;if(curView==='vBot')render(true)},4000);return}resetArm=false;BOT={open:[],closed:[],skipped:0,since:Date.now(),v2:Date.now(),v3:Date.now()};botSave();render(true)};
   $('vBot').querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{const t=BOT.open.find(x=>x.id===b.dataset.close);if(t&&S[t.s].price){botClose(t,S[t.s].price,'manual');render(true)}});
   $('vBot').querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>openNote(b.dataset.note));
   $('vBot').querySelectorAll('[data-chart]').forEach(b=>b.onclick=()=>openSheet(b.dataset.chart));
@@ -445,7 +452,7 @@ function drawEq(){const box=$('eq');if(!box)return;if(EQ){try{EQ.remove()}catch(
   const C=BOT.closed.filter(t=>botOf(t)!=='v1').slice().reverse();if(C.length<2||typeof LightweightCharts==='undefined'){box.style.display='none';return}
   box.style.display='block';
   EQ=LightweightCharts.createChart(box,{width:box.clientWidth,height:140,layout:{background:{type:'solid',color:'#181c25'},textColor:'#8a93a6',fontSize:10},grid:{vertLines:{visible:false},horzLines:{color:'#232836'}},rightPriceScale:{borderVisible:false},timeScale:{visible:false},handleScroll:false,handleScale:false,crosshair:{mode:0}});
-  for(const [b,col] of [['A','#7c8cff'],['B','#f5b942']]){let eq=0,lastT=0;const pts=[];for(const t of C.filter(t=>botOf(t)===b)){eq+=t.pnl;let tt=Math.floor(t.t1/1000);if(tt<=lastT)tt=lastT+1;lastT=tt;pts.push({time:tt,value:+eq.toFixed(2)})}
+  for(const [b,col] of [['A','#4b5390'],['B','#f5b942'],['C','#22c55e']]){let eq=0,lastT=0;const pts=[];for(const t of C.filter(t=>botOf(t)===b)){eq+=t.pnl;let tt=Math.floor(t.t1/1000);if(tt<=lastT)tt=lastT+1;lastT=tt;pts.push({time:tt,value:+eq.toFixed(2)})}
     if(pts.length){const l=EQ.addLineSeries({color:col,lineWidth:2,priceFormat:{type:'price',precision:2,minMove:.01},lastValueVisible:true,priceLineVisible:false});l.setData(pts)}}
   EQ.timeScale().fitContent()}
 let noteId=null;
