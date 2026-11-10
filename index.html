@@ -128,7 +128,11 @@ const COINS=[
  {s:'AAVE',cg:'aave'},{s:'MORPHO',cg:'morpho'},{s:'ONDO',cg:'ondo-finance'},{s:'JUP',cg:'jupiter-exchange-solana'},
  {s:'PUMP',cg:'pump-fun',alt:['PUMPFUNUSDT']},{s:'NEAR',cg:'near'},{s:'CAKE',cg:'pancakeswap-token'},{s:'SUI',cg:'sui'},
  {s:'PENDLE',cg:'pendle'},{s:'AERO',cg:'aerodrome-finance'},{s:'LINK',cg:'chainlink'},{s:'TAO',cg:'bittensor'},
- {s:'ENA',cg:'ethena'},{s:'VIRTUAL',cg:'virtual-protocol'},{s:'UNI',cg:'uniswap'}
+ {s:'ENA',cg:'ethena'},{s:'VIRTUAL',cg:'virtual-protocol'},{s:'UNI',cg:'uniswap'},
+ // extra: só para os bots (não aparecem nas bolhas nem nos sinais)
+ {s:'DOGE',cg:'dogecoin',x:1},{s:'BNB',cg:'binancecoin',x:1},{s:'AVAX',cg:'avalanche-2',x:1},{s:'LTC',cg:'litecoin',x:1},{s:'ADA',cg:'cardano',x:1},
+ {s:'BCH',cg:'bitcoin-cash',x:1},{s:'DOT',cg:'polkadot',x:1},{s:'APT',cg:'aptos',x:1},{s:'ARB',cg:'arbitrum',x:1},{s:'WLD',cg:'worldcoin-wld',x:1},
+ {s:'INJ',cg:'injective-protocol',x:1},{s:'TIA',cg:'celestia',x:1},{s:'WIF',cg:'dogwifcoin',x:1}
 ];
 const LEV=10, SLTP=0.03, MMR=0.005, FEE=0.00055;
 const M15=900000;
@@ -230,6 +234,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(!ws||ws.
 function onMsg(m){
   const [kind,...rest]=m.topic.split('.');const sym=rest[rest.length-1];const k=SYM2C[sym];if(!k)return;const s=S[k];
   if(kind==='tickers'){const d=m.data;s.bsym=sym;
+    if(d.nextFundingTime){const nft=+d.nextFundingTime;if(s.nft&&nft>s.nft&&s.funding!=null)onFunding(s,s.funding);s.nft=nft}
     if(d.lastPrice)s.price=+d.lastPrice;if(d.price24hPcnt)s.ch24=+d.price24hPcnt;if(d.fundingRate)s.funding=+d.fundingRate;
     if(d.openInterestValue)s.oi=+d.openInterestValue;if(d.turnover24h)s.turn=+d.turnover24h;if(d.highPrice24h)s.hi=+d.highPrice24h;if(d.lowPrice24h)s.lo=+d.lowPrice24h;
     if(s.c15.length&&s.price){const l=s.c15[s.c15.length-1];if(Date.now()-l.t<M15){l.c=s.price;l.h=Math.max(l.h,s.price);l.l=Math.min(l.l,s.price)}}
@@ -239,7 +244,7 @@ function onMsg(m){
     if(sel===k&&cfg.ctf==='1m')fillChart(false);
   }else if(kind==='kline'){for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c15;const l=c[c.length-1];
       if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t)c.push(x);
-      if(d.confirm){const br=findBreak(s,x);compute(s);if(br){const bot=botOnBreak(s,br.dir,br.lvl,x.c);pushAlert({t:Date.now(),s:s.s,type:'brk',dir:br.dir,txt:`${br.dir>0?'Rompeu resistência':'Perdeu suporte'} ${fp(br.lvl)} (fecho 15m ${fp(x.c)})\n${planTxt(br.dir>0?'LONG':'SHORT',x.c)}\n${bot}`},true)}}}}
+      if(d.confirm){if((x.t+M15)%3600000===0)setTimeout(()=>onHourClose(s),0);const br=findBreak(s,x);compute(s);if(br){const bot=botOnBreak(s,br.dir,br.lvl,x.c);pushAlert({t:Date.now(),s:s.s,type:'brk',dir:br.dir,txt:`${br.dir>0?'Rompeu resistência':'Perdeu suporte'} ${fp(br.lvl)} (fecho 15m ${fp(x.c)})\n${planTxt(br.dir>0?'LONG':'SHORT',x.c)}\n${bot}`},true)}}}}
   else if(kind==='allLiquidation'){for(const d of m.data){const usd=+d.v*+d.p;const side=d.S==='Buy'?'LONG':'SHORT';const it={t:+d.T,s:k,side,usd,p:+d.p};
       s.liq.unshift(it);s.liq.length=Math.min(s.liq.length,30);liqAll.unshift(it);if(liqAll.length>400)liqAll.length=400;
       if(usd>=cfg.liqMin)pushAlert({t:it.t,s:k,type:'liq',txt:`${side} liquidado ${fusd(usd)} @ ${fp(it.p)}`,dir:side==='LONG'?-1:1},false)}}
@@ -265,6 +270,7 @@ if(!Array.isArray(BOT.open))BOT={open:[],closed:[],skipped:0,since:Date.now()};
 function botSave(){save('bot',BOT)}
 if(!BOT.v2){BOT.v2=Date.now();save('bot',BOT)}
 if(!BOT.v3){BOT.v3=Date.now();save('bot',BOT)}
+if(!BOT.v4){BOT.v4=Date.now();save('bot',BOT)}
 function plan(side,p,k=SLTP){const l=side==='LONG';return {entry:p,sl:l?p*(1-k):p*(1+k),tp:l?p*(1+k):p*(1-k),liq:l?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR)}}
 function planTxt(side,p){const q=plan(side,p);return `Plano ${side}: entrada ${fp(q.entry)} · SL ${fp(q.sl)} · TP ${fp(q.tp)} · liq ≈ ${fp(q.liq)}`}
 // slippage: entrada a mercado e SL/fecho manual pioram o preço; TP é ordem limite (sem slippage)
@@ -272,8 +278,10 @@ function pnlOf(t,exit,how){const pos=t.margin*LEV;const sl=t.slip||0;const L=t.s
   const en=t.fill||t.entry;const ex=(how&&how.startsWith('TP'))?exit:(L?exit*(1-sl):exit*(1+sl));
   const r=L?ex/en-1:1-ex/en;return pos*r-pos*FEE*2}
 // decide se o bot entra numa quebra; devolve texto com a decisão
-const BOTS={A:'Quebra',B:'Reversão',C:'Reversão c/ viés'};
-const BOTS_ON=['B','C']; // A desligado a 9 nov 2026 (37 trades ~35% de acerto)
+const BOTS={A:'Quebra',B:'Reversão de quebras',C:'Reversão c/ viés',F:'Funding ≥0,015%','F+':'Funding ≥0,03%',G:'Reversão de pânico'};
+const BCOL={A:'#4b5390',B:'#f5b942',C:'#16a34a',F:'#22c55e','F+':'#2dd4bf',G:'#c084fc'};
+const BOTS_ON=[]; // bots de quebras S/R desligados a 10 nov 2026 (backtest de 17 dias: ~50% de acerto, negativos)
+const ACTIVE=['F','F+','G'];
 function botOf(t){return t.bot||'v1'}
 // Dois bots em paralelo, sobre o mesmo sinal: A segue a quebra, B aposta na quebra falsa (lado contrário)
 function botOnBreak(s,dir,lvl,close){
@@ -310,6 +318,31 @@ function tryBot(b,s,dir,lvl,close){
     reason:`${dir>0?'Rompeu R':'Perdeu S'} ${num(lvl)}`,note:''};
   BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);return `🤖 bot ${b} abriu ${side} @ ${fp(close)}`;
 }
+function atrH(h,end,n=14){if(end<n+1)return null;let a=0;for(let i=end-n+1;i<=end;i++){const x=h[i],p=h[i-1];a+=Math.max(x.h-x.l,Math.abs(x.h-p.c),Math.abs(x.l-p.c))}return a/n}
+function openGen(b,s,side,slD,tpD,maxH,reason,extra){
+  if(!cfg.bot)return `bot ${b}: bots desligados`;
+  const now=Date.now();const mine=x=>botOf(x)===b;const why=[];
+  if(BOT.open.some(t=>mine(t)&&t.s===s.s))why.push('já tem posição nesta moeda');
+  if(BOT.open.filter(mine).length>=6)why.push('máximo de 6 posições');
+  const last=BOT.closed.find(t=>mine(t)&&t.s===s.s);if(last&&now-last.t1<3600000)why.push('pausa de 1h');
+  if(why.length){BOT['skip'+b]=(BOT['skip'+b]||0)+1;botSave();return `bot ${b}: de fora (${why.join(', ')})`}
+  const p=s.price;const slip=(cfg.botSlip??0.05)/100;const L=side==='LONG';
+  const t={bot:b,pct:slD/p,slip,fill:L?p*(1+slip):p*(1-slip),id:now.toString(36)+b+s.s,s:s.s,side,entry:p,sl:L?p-slD:p+slD,tp:L?p+tpD:p-tpD,
+    liq:L?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR),margin:cfg.margin,t0:now,maxT:now+maxH*3600000,sc:s.ind?s.ind.sc:null,r15:s.ind&&s.ind.r15!=null?Math.round(s.ind.r15):null,reason,note:'',...(extra||{})};
+  BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
+  pushAlert({t:now,s:s.s,type:'bot',dir:L?1:-1,txt:`🤖 bot ${b} abriu ${side} @ ${fp(p)} · ${reason}\nSL ${fp(t.sl)} · TP ${fp(t.tp)} · saída máx. em ${maxH}h`},true);
+  return `bot ${b} abriu ${side}`;
+}
+// F / F+: no momento da liquidação do funding, contra o lado que paga (multidão alavancada)
+function onFunding(s,f){if(!s.price||!s.c15.length)return;const h=agg(s.c15,4);const a=atrH(h,h.length-1);if(!a)return;
+  const side=f>0?'SHORT':'LONG';const r=`funding ${(f*100).toFixed(4)}%`;
+  if(Math.abs(f)>=.00015)openGen('F',s,side,2*a,2*a,24,r,{fund:f});
+  if(Math.abs(f)>=.0003)openGen('F+',s,side,2*a,2*a,24,r,{fund:f});}
+// G: no fecho de cada hora, vela de 1h ≥2,5×ATR com volume ≥3× a média de 24h → aposta na reversão
+function onHourClose(s){const h=agg(s.c15,4);const n=h.length;if(n<30)return;const last=h[n-1];if(Date.now()-last.t<3600000-60000)return;
+  const ap=atrH(h,n-2);if(!ap)return;const mv=last.c-h[n-2].c;const av=h.slice(n-25,n-1).reduce((x,y)=>x+y.v,0)/24;
+  if(!(av>0)||last.v<3*av||Math.abs(mv)<2.5*ap)return;const a=atrH(h,n-1)||ap;
+  openGen('G',s,mv<0?'LONG':'SHORT',1.5*a,1.5*a,12,`vela 1h ${mv<0?'de pânico':'de euforia'} ${fpct(last.c/h[n-2].c-1)} · volume ${(last.v/av).toFixed(1)}×`);}
 function botClose(t,exit,how,when){
   const i=BOT.open.indexOf(t);if(i<0)return;BOT.open.splice(i,1);
   const c={...t,exit,t1:when||Date.now(),how,pnl:pnlOf(t,exit,how)};BOT.closed.unshift(c);if(BOT.closed.length>500)BOT.closed.length=500;botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
@@ -320,11 +353,12 @@ function fmtPnl(x){return (x>=0?'+$':'-$')+Math.abs(x).toFixed(2)}
 // verificação em tempo real (cada tick)
 function botTick(s){if(!BOT.open.length||s.price==null)return;const p=s.price;
   for(const t of BOT.open.filter(t=>t.s===s.s)){const l=t.side==='LONG';
-    if(l?p<=t.sl:p>=t.sl)botClose(t,t.sl,'SL');else if(l?p>=t.tp:p<=t.tp)botClose(t,t.tp,'TP')}}
+    if(l?p<=t.sl:p>=t.sl)botClose(t,t.sl,'SL');else if(l?p>=t.tp:p<=t.tp)botClose(t,t.tp,'TP');else if(t.maxT&&Date.now()>=t.maxT)botClose(t,p,'tempo')}}
 // resolve posições abertas enquanto a app esteve fechada (velas 15m; se SL e TP na mesma vela, assume SL)
 function botOffline(s){
   for(const t of BOT.open.filter(t=>t.s===s.s)){const l=t.side==='LONG';const start=Math.floor(t.t0/M15)*M15+M15;
     for(const x of s.c15){if(x.t<start||Date.now()-x.t<M15)continue;
+      if(t.maxT&&x.t>=t.maxT){botClose(t,x.o,'tempo (offline)',x.t);break}
       const hitSL=l?x.l<=t.sl:x.h>=t.sl, hitTP=l?x.h>=t.tp:x.l<=t.tp;
       if(hitSL){botClose(t,t.sl,'SL (offline)',x.t+M15);break}if(hitTP){botClose(t,t.tp,'TP (offline)',x.t+M15);break}}}}
 function botStats(list){
@@ -339,13 +373,14 @@ function statLine(list){const x=botStats(list);return `${x.n} trades · acerto $
 function botReport(){
   const C=BOT.closed;const L=[];
   L.push('RELATÓRIO BOTS — CRIPTO LIVE (paper trading)');
-  L.push(`Gerado: ${dt(Date.now())} · histórico desde ${dt(BOT.since)}${BOT.v2?' · bots A/B desde '+dt(BOT.v2):''}${BOT.v3?' · bot C desde '+dt(BOT.v3):''}`);
+  L.push(`Gerado: ${dt(Date.now())} · histórico desde ${dt(BOT.since)}${BOT.v2?' · bots A/B desde '+dt(BOT.v2):''}${BOT.v3?' · bot C desde '+dt(BOT.v3):''}${BOT.v4?' · bots F/F+/G desde '+dt(BOT.v4):''}`);
   L.push(`Setup: ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin} · viés mínimo A ${cfg.botSc} · máx ${cfg.botMax} posições/bot, 3 no mesmo sentido, 2 entradas/vela, pausa 4h após SL, sem repetir nível 24h`);
-  L.push('A = Quebra (desligado desde 9/11) · B = Reversão (lado contrário da quebra, sem filtro de viés) · C = Reversão só com o viés a favor (quebra contra a tendência)');
-  for(const b of ['A','B','C','v1']){const list=C.filter(t=>botOf(t)===b);const op=BOT.open.filter(t=>botOf(t)===b);if(!list.length&&!op.length&&(b==='v1'||b==='C'&&false))continue;
-    L.push('');L.push(`== BOT ${b}${b==='v1'?' (versão antiga, antes dos filtros)':' — '+BOTS[b]} ==`);
+  L.push('Ativos: F = funding ≥±0,015% contra a multidão · F+ = funding ≥±0,03% · G = reversão após vela 1h ≥2,5×ATR com volume ≥3× (SL/TP 2×ATR em F, 1,5×ATR em G; saída máx. 24h F, 12h G). Desligados: A, B, C (quebras S/R).');
+  for(const b of ['F','F+','G','A','B','C','v1']){const list=C.filter(t=>botOf(t)===b);const op=BOT.open.filter(t=>botOf(t)===b);if(!list.length&&!op.length&&!ACTIVE.includes(b))continue;
+    L.push('');L.push(`== BOT ${b}${b==='v1'?' (versão antiga, antes dos filtros)':' — '+BOTS[b]}${ACTIVE.includes(b)||b==='v1'?'':' (desligado)'} ==`);
     L.push(statLine(list));
     const x=botStats(list);L.push(`Ganho médio ${fmtPnl(x.avgW)} · perda média -$${x.avgL.toFixed(2)} · recusados ${b==='v1'?BOT.skipped:(BOT['skip'+b]||0)} · abertas ${op.length}`);
+    const hw={};for(const t of list){const k=t.how.split(' ')[0];hw[k]=(hw[k]||0)+1}if(list.length)L.push('Saídas: '+Object.entries(hw).map(([k,v])=>k+' '+v).join(' · '));
     const sd=k=>{const y=list.filter(t=>t.side===k);return `${k} ${y.length}t ${(botStats(y).wr*100).toFixed(0)}% ${fmtPnl(botStats(y).pnl)}`};L.push(sd('LONG')+' | '+sd('SHORT'));
     const by={};for(const t of list)(by[t.s]=by[t.s]||[]).push(t);
     if(list.length)L.push('Por moeda: '+Object.entries(by).map(([k,v])=>{const y=botStats(v);return `${k} ${y.n}t ${(y.wr*100).toFixed(0)}% ${fmtPnl(y.pnl)}`}).join(' | '));
@@ -379,7 +414,7 @@ function render(force){const now=Date.now();if(!force&&now-lastR<1000)return;las
 setInterval(()=>render(),1000);
 
 function renderList(){
-  const arr=COINS.map(c=>S[c.s]).sort((a,b)=>(Math.abs(b.ind?.sc||0)-Math.abs(a.ind?.sc||0))||((a.rank||999)-(b.rank||999)));
+  const arr=COINS.filter(c=>!c.x).map(c=>S[c.s]).sort((a,b)=>(Math.abs(b.ind?.sc||0)-Math.abs(a.ind?.sc||0))||((a.rank||999)-(b.rank||999)));
   $('vList').innerHTML=arr.map(s=>{const i=s.ind;const ch=chg(s,cfg.tf);const [bt,bc]=i?bias(i.sc):['a carregar…','neu'];
     return `<div class="card" data-s="${s.s}"><div class="row"><span class="coin">${s.s}</span><span class="rank">#${s.rank??'—'}</span><span class="spacer"></span><span class="price">${fp(s.price)}</span><span class="pill ${cls(ch)}">${fpct(ch)}</span></div>
     <div class="pills"><span class="pill ${bc==='neu'?'':bc}">${bt}</span>${i?`<span class="pill">RSI15 ${i.r15?.toFixed(0)??'—'}</span><span class="pill">RSI1h ${i.r1?.toFixed(0)??'—'}</span>`:''}<span class="pill ${s.funding>.0003?'warn':''}">Fund ${s.funding!=null?(s.funding*100).toFixed(4)+'%':'—'}</span></div></div>`}).join('')+
@@ -397,10 +432,10 @@ function renderAlerts(){
   $('clrA').onclick=()=>{alerts=[];save('alerts',alerts);render(true)};
 }
 function renderBot(){
-  const ST={A:botStats(BOT.closed.filter(t=>botOf(t)==='A')),B:botStats(BOT.closed.filter(t=>botOf(t)==='B')),C:botStats(BOT.closed.filter(t=>botOf(t)==='C'))},OLD=BOT.closed.filter(t=>botOf(t)==='v1');
-  const pf=x=>x.n?(x.pf===Infinity?'∞':x.pf.toFixed(2)):'—';const KS=['A','B','C'];
-  const row=(k,f)=>`<div class="lvl" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;text-align:right"><span class="mut" style="text-align:left">${k}</span>${KS.map(b=>`<b style="${b==='A'?'opacity:.45':''}">${f(b)}</b>`).join('')}</div>`;
-  const badge=t=>`<span class="pill ${botOf(t)==='A'?'acc':botOf(t)==='B'?'warn':botOf(t)==='C'?'up':''}">${botOf(t)==='v1'?'v1':'Bot '+botOf(t)}</span>`;
+  const KS=['F','F+','G','B','C'];const ST={};for(const b of KS)ST[b]=botStats(BOT.closed.filter(t=>botOf(t)===b));const OLD=BOT.closed.filter(t=>botOf(t)==='v1'||botOf(t)==='A');
+  const pf=x=>x.n?(x.pf===Infinity?'∞':x.pf.toFixed(2)):'—';const GRID='display:grid;grid-template-columns:1.25fr repeat(5,1fr);text-align:right;font-size:12px';
+  const row=(k,f)=>`<div class="lvl" style="${GRID}"><span class="mut" style="text-align:left">${k}</span>${KS.map(b=>`<b style="${ACTIVE.includes(b)?'':'opacity:.4'}">${f(b)}</b>`).join('')}</div>`;
+  const badge=t=>{const b=botOf(t);return `<span class="pill" style="color:${BCOL[b]||'var(--mut)'};border-color:${BCOL[b]||'var(--line)'}">${b==='v1'?'v1':'Bot '+b}</span>`};
   const openH=BOT.open.map(t=>{const up=t.side==='LONG';return `<div class="card tr ${up?'up':'dn'}" data-id="${t.id}"><div class="row"><span class="coin">${t.s}</span>${badge(t)}<span class="pill ${up?'up':'dn'}">${t.side} ${LEV}x · ${((t.pct||SLTP)*100).toFixed(1)}%</span><span class="spacer"></span><b id="pl_${t.id}" class="price">—</b></div>
    <div class="pills sm"><span class="pill">Entrada ${fp(t.entry)}</span><span class="pill dn">SL ${fp(t.sl)}</span><span class="pill up">TP ${fp(t.tp)}</span><span class="pill">Liq ≈ ${fp(t.liq)}</span></div>
    <div class="row sm mut" style="margin-top:8px"><span>${dt(t.t0)} · ${t.reason} · score ${t.sc>0?'+':''}${t.sc}</span><span class="spacer"></span><span id="px_${t.id}"></span></div>
@@ -409,17 +444,17 @@ function renderBot(){
   const histH=BOT.closed.slice(0,60).map(t=>`<div class="it"><span class="t">${dt(t.t1).replace(' ','<br>')}</span><div style="flex:1"><div class="row"><b>${t.s}</b>${badge(t)}<span class="pill ${t.side==='LONG'?'up':'dn'}">${t.side}</span><span class="pill ${t.how.startsWith('TP')?'up':t.how.startsWith('SL')?'dn':''}">${t.how}</span><span class="spacer"></span><b class="${t.pnl>0?'up':'dn'}">${fmtPnl(t.pnl)}</b></div>
    <div class="sm mut">${fp(t.entry)} → ${fp(t.exit)} · ${t.reason}</div>${t.note?`<div class="sm">📝 ${esc(t.note)}</div>`:''}<button class="btn sm" style="margin-top:6px;padding:5px 9px" data-note="${t.id}">📝 ${t.note?'Editar nota':'Nota'}</button></div></div>`).join('');
   $('vBot').innerHTML=`<div class="card"><div class="row"><b>Bot paper trading</b><span class="spacer"></span><span class="sm mut">${cfg.bot?'ligado':'desligado'}</span><button class="tog ${cfg.bot?'on':''}" id="botTog" aria-label="Ligar bot"></button></div>
-   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real. Sinal: quebra de S/R no fecho de 15m. <b style="color:var(--warn)">B · Reversão</b> entra ao contrário da quebra; <b style="color:var(--up)">C</b> faz o mesmo mas só quando o viés favorece a reversão (quebra contra a tendência). <span style="opacity:.6">A · Quebra desligado.</span> ${LEV}x · SL/TP ${cfg.botPct}% · slippage ${cfg.botSlip}% · margem $${cfg.margin}.</p>
-   <div class="card" style="margin:10px 0 0;padding:4px 12px;background:var(--card2)">
-    <div class="lvl" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;text-align:right"><span></span><b style="color:var(--acc);opacity:.45">A</b><b style="color:var(--warn)">B</b><b style="color:var(--up)">C</b></div>
+   <p class="mut sm" style="margin:6px 0 0">Simulado, sem dinheiro real, em ${COINS.length} moedas. <b style="color:${BCOL.F}">F</b> e <b style="color:${BCOL['F+']}">F+</b>: quando o funding liquida acima de ±0,015% / ±0,03%, entram contra o lado que paga (SL/TP 2×ATR 1h, saída máx. 24h). <b style="color:${BCOL.G}">G</b>: depois de uma vela de 1h de pânico ou euforia (≥2,5×ATR, volume ≥3×), aposta na reversão (SL/TP 1,5×ATR, máx. 12h). <span style="opacity:.6">B e C (quebras S/R) desligados.</span> ${LEV}x · slippage ${cfg.botSlip}% · margem $${cfg.margin}.</p>
+   <div class="card" style="margin:10px 0 0;padding:4px 10px;background:var(--card2)">
+    <div class="lvl" style="${GRID}"><span></span>${KS.map(b=>`<b style="color:${BCOL[b]};${ACTIVE.includes(b)?'':'opacity:.4'}">${b}</b>`).join('')}</div>
     ${row('Trades',b=>ST[b].n)}${row('Acerto',b=>ST[b].n?(ST[b].wr*100).toFixed(0)+'%':'—')}
     ${row('P&L',b=>`<span class="${ST[b].pnl>0?'up':ST[b].pnl<0?'dn':''}">${ST[b].n?fmtPnl(ST[b].pnl):'—'}</span>`)}
     ${row('Profit factor',b=>pf(ST[b]))}${row('Drawdown',b=>ST[b].n?'-$'+ST[b].dd.toFixed(0):'—')}
     ${row('Recusados',b=>BOT['skip'+b]||0)}${row('Abertas',b=>BOT.open.filter(t=>botOf(t)===b).length)}</div>
-   ${OLD.length?`<p class="mut sm" style="margin:8px 0 0">Versão antiga (v1, sem filtros): ${statLine(OLD)}</p>`:''}
+   ${OLD.length?`<p class="mut sm" style="margin:8px 0 0">Antigos (v1 e A, quebras): ${statLine(OLD)}</p>`:''}
    <div id="eq"></div>
    <div class="row" style="margin-top:10px;gap:8px"><button class="btn acc" id="repBtn">Relatório para o Claude</button><span class="spacer"></span><button class="btn" id="closeAll">Fechar todas</button></div></div>
-   <h3>Abertas (${BOT.open.length})</h3>${openH||'<p class="mut sm">Sem posições abertas. Os bots esperam por uma quebra de S/R.</p>'}
+   <h3>Abertas (${BOT.open.length})</h3>${openH||'<p class="mut sm">Sem posições abertas. Os bots esperam por funding extremo ou por uma vela de pânico/euforia.</p>'}
    <h3>Histórico</h3><div class="card feed">${histH||'<p class="mut sm">Ainda sem trades fechados.</p>'}</div>
    <div class="card"><b>Filtros do bot</b>
     <label class="sm mut" style="display:block;margin-top:8px">SL e TP do bot (% no preço do ativo)</label><input id="bPct" type="number" inputmode="decimal" step="0.1" min="0.5" max="5" value="${cfg.botPct}">
@@ -437,7 +472,7 @@ function renderBot(){
   $('bMax').onchange=e=>{cfg.botMax=Math.max(1,Math.min(19,+e.target.value||5));save('cfg',cfg)};
   $('repBtn').onclick=()=>{$('repTx').value=botReport();$('repDlg').classList.add('on')};
   $('closeAll').onclick=()=>{for(const t of BOT.open.slice()){const p=S[t.s].price;if(p)botClose(t,p,'manual')}render(true)};
-  $('botReset').onclick=()=>{if(!resetArm){resetArm=true;render(true);setTimeout(()=>{resetArm=false;if(curView==='vBot')render(true)},4000);return}resetArm=false;BOT={open:[],closed:[],skipped:0,since:Date.now(),v2:Date.now(),v3:Date.now()};botSave();render(true)};
+  $('botReset').onclick=()=>{if(!resetArm){resetArm=true;render(true);setTimeout(()=>{resetArm=false;if(curView==='vBot')render(true)},4000);return}resetArm=false;BOT={open:[],closed:[],skipped:0,since:Date.now(),v2:Date.now(),v3:Date.now(),v4:Date.now()};botSave();render(true)};
   $('vBot').querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{const t=BOT.open.find(x=>x.id===b.dataset.close);if(t&&S[t.s].price){botClose(t,S[t.s].price,'manual');render(true)}});
   $('vBot').querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>openNote(b.dataset.note));
   $('vBot').querySelectorAll('[data-chart]').forEach(b=>b.onclick=()=>openSheet(b.dataset.chart));
@@ -449,10 +484,10 @@ function botLive(){for(const t of BOT.open){const p=S[t.s].price;const el=$('pl_
   const l=t.side==='LONG';const dSL=Math.abs(p/t.sl-1)*100,dTP=Math.abs(t.tp/p-1)*100;const x=$('px_'+t.id);if(x)x.textContent=`${fp(p)} · SL a ${dSL.toFixed(2)}% · TP a ${dTP.toFixed(2)}%`}}
 let EQ=null;
 function drawEq(){const box=$('eq');if(!box)return;if(EQ){try{EQ.remove()}catch(e){}EQ=null}
-  const C=BOT.closed.filter(t=>botOf(t)!=='v1').slice().reverse();if(C.length<2||typeof LightweightCharts==='undefined'){box.style.display='none';return}
+  const C=BOT.closed.filter(t=>!['v1','A'].includes(botOf(t))).slice().reverse();if(C.length<2||typeof LightweightCharts==='undefined'){box.style.display='none';return}
   box.style.display='block';
   EQ=LightweightCharts.createChart(box,{width:box.clientWidth,height:140,layout:{background:{type:'solid',color:'#181c25'},textColor:'#8a93a6',fontSize:10},grid:{vertLines:{visible:false},horzLines:{color:'#232836'}},rightPriceScale:{borderVisible:false},timeScale:{visible:false},handleScroll:false,handleScale:false,crosshair:{mode:0}});
-  for(const [b,col] of [['A','#4b5390'],['B','#f5b942'],['C','#22c55e']]){let eq=0,lastT=0;const pts=[];for(const t of C.filter(t=>botOf(t)===b)){eq+=t.pnl;let tt=Math.floor(t.t1/1000);if(tt<=lastT)tt=lastT+1;lastT=tt;pts.push({time:tt,value:+eq.toFixed(2)})}
+  for(const b of ['F','F+','G','B','C']){const col=BCOL[b];let eq=0,lastT=0;const pts=[];for(const t of C.filter(t=>botOf(t)===b)){eq+=t.pnl;let tt=Math.floor(t.t1/1000);if(tt<=lastT)tt=lastT+1;lastT=tt;pts.push({time:tt,value:+eq.toFixed(2)})}
     if(pts.length){const l=EQ.addLineSeries({color:col,lineWidth:2,priceFormat:{type:'price',precision:2,minMove:.01},lastValueVisible:true,priceLineVisible:false});l.setData(pts)}}
   EQ.timeScale().fitContent()}
 let noteId=null;
@@ -587,7 +622,7 @@ function renderSheet(){
 
 /* ===== Bolhas ===== */
 const cv=$('cv'),ctx=cv.getContext('2d');let W=0,H=0,DPR=1;
-const B=COINS.map((c,i)=>({k:c.s,x:Math.random()*300+30,y:Math.random()*400+30,vx:0,vy:0,r:20}));
+const B=COINS.filter(c=>!c.x).map((c,i)=>({k:c.s,x:Math.random()*300+30,y:Math.random()*400+30,vx:0,vy:0,r:20}));
 function resize(){const r=cv.getBoundingClientRect();if(!r.width)return;DPR=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0)}
 addEventListener('resize',resize);
 function targetR(){
