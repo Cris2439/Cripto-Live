@@ -325,8 +325,8 @@ function atrH(h,end,n=14){if(end<n+1)return null;let a=0;for(let i=end-n+1;i<=en
 // Alerta no telemóvel via ntfy.sh (app ntfy, subscrever o tópico). Sem som entre as 22h e as 7h.
 function pushPhone(title,message,tags){const hr=new Date().getHours();const quiet=hr>=22||hr<7;
   // Telegram (fiável no iPhone): token e chat ficam só neste navegador, nunca no código publicado
-  if(cfg.tg&&cfg.tg.token&&cfg.tg.chat){fetch(`https://api.telegram.org/bot${cfg.tg.token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({chat_id:cfg.tg.chat,text:`${title}\n${message}`,disable_notification:quiet})}).catch(()=>{});return}
+  if(cfg.tg&&cfg.tg.token&&cfg.tg.chat){// formato form (sem preflight CORS; o Telegram recusa JSON vindo de um browser)
+    fetch(`https://api.telegram.org/bot${cfg.tg.token}/sendMessage`,{method:'POST',body:new URLSearchParams({chat_id:String(cfg.tg.chat),text:`${title}\n${message}`,disable_notification:String(quiet)})}).catch(()=>{});return}
   if(!cfg.ntfy)return;
   fetch('https://ntfy.sh/',{method:'POST',body:JSON.stringify({topic:cfg.ntfy,title,message,priority:quiet?2:4,tags:tags||[],click:location.href.split('?')[0]})}).catch(()=>{})}
 function openGen(b,s,side,slD,tpD,maxH,reason,extra){
