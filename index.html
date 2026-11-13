@@ -538,11 +538,13 @@ function renderCfg(){
    <div class="card"><b>Notificações</b><p class="mut sm">Com a app aberta: aviso no ecrã + vibração. Notificações do sistema só funcionam com a app adicionada ao ecrã principal e aberta.</p><button class="btn acc" id="nBtn">${cfg.notif?'Ativas ✓':'Ativar notificações'}</button></div>
    <div class="card sm"><b>Fontes</b><p class="mut">Preços, funding, OI e liquidações: Bybit (perpétuos USDT, WebSocket). Histórico: ${[...new Set(COINS.map(c=>S[c.s].src).filter(Boolean))].join(', ')||'a carregar'}. Ranking: CoinGecko.</p>
    <p class="mut">${COINS.filter(c=>!S[c.s].price).map(c=>c.s).join(', ')||'Todas as moedas com dados.'}${COINS.some(c=>!S[c.s].price)?' — ainda sem preço.':''}</p></div>`;
-  $('tgLink').onclick=async()=>{const tok=$('tgTok').value.trim();if(!tok)return toast('Cola o token primeiro');
+  $('tgLink').onclick=async()=>{const tok=$('tgTok').value.replace(/[\s\u200B-\u200D\uFEFF]+/g,'');$('tgTok').value=tok;if(!tok)return toast('Cola o token primeiro');
+    if(!/^\d+:[A-Za-z0-9_-]{30,}$/.test(tok))return toast(`O token não tem o formato certo (números:letras, ${tok.length} caracteres)`);
     try{if(!cfg.tg.chat||cfg.tg.token!==tok){const j=await fetch(`https://api.telegram.org/bot${tok}/getUpdates`).then(r=>r.json());
-      if(!j.ok)return toast('Token inválido');const u=(j.result||[]).reverse().find(x=>x.message&&x.message.chat);
+      if(!j.ok)return toast(`Telegram recusou: ${j.description||'erro '+j.error_code}`);const u=(j.result||[]).reverse().find(x=>x.message&&x.message.chat);
       if(!u)return toast('Envia /start ao teu bot no Telegram e tenta outra vez');cfg.tg={token:tok,chat:u.message.chat.id};save('cfg',cfg)}
-      pushPhone('Cripto Live: ligado ✓','Os alertas dos bots vão chegar aqui.');toast('Ligado — vê o Telegram');render(true)}catch(e){toast('Erro a ligar ao Telegram')}};
+      const sr=await fetch(`https://api.telegram.org/bot${tok}/sendMessage`,{method:'POST',body:new URLSearchParams({chat_id:String(cfg.tg.chat),text:'Cripto Live: ligado ✓\nOs alertas dos bots vão chegar aqui.'})}).then(r=>r.json());
+      toast(sr.ok?'Ligado — vê o Telegram':`Telegram recusou o envio: ${sr.description}`);render(true)}catch(e){toast('Erro de rede a ligar ao Telegram: '+e.message)}};
   if($('tgOff'))$('tgOff').onclick=()=>{cfg.tg={token:'',chat:''};save('cfg',cfg);render(true)};
   $('ntCopy').onclick=async()=>{try{await navigator.clipboard.writeText(cfg.ntfy);toast('Tópico copiado')}catch(e){$('ntTopic').select();toast('Seleciona e copia')}};
   $('ntTest').onclick=()=>{pushPhone('Cripto Live: teste ✓','Se estás a ver isto, os alertas dos bots vão chegar ao telemóvel.',['robot']);toast('Teste enviado')};
