@@ -139,9 +139,10 @@ const M15=900000;
 const S={}; const SYM2C={};
 COINS.forEach(c=>{S[c.s]={...c,price:null,ch24:null,funding:null,oi:null,turn:null,hi:null,lo:null,rank:null,mcap:null,c15:[],lv:{sup:[],res:[]},ind:null,liq:[],src:null};
   [c.s+'USDT',...(c.alt||[])].forEach(x=>SYM2C[x]=c.s);});
-const cfg=load('cfg',{ntfy:'',push:{G:true,F:false,'F+':false,fecho:true},botSlip:0.05,botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
+const cfg=load('cfg',{tg:{token:'',chat:''},ntfy:'',push:{G:true,F:false,'F+':false,fecho:true},botSlip:0.05,botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
 if(!cfg.ntfy){cfg.ntfy='cripto-live-'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,8);save('cfg',cfg)}
 if(!cfg.push)cfg.push={G:true,F:false,'F+':false,fecho:true};
+if(!cfg.tg)cfg.tg={token:'',chat:''};
 let alerts=load('alerts',[]); let unseen=0;
 const liqAll=[]; // {t,s,side,usd}
 
@@ -322,7 +323,11 @@ function tryBot(b,s,dir,lvl,close){
 }
 function atrH(h,end,n=14){if(end<n+1)return null;let a=0;for(let i=end-n+1;i<=end;i++){const x=h[i],p=h[i-1];a+=Math.max(x.h-x.l,Math.abs(x.h-p.c),Math.abs(x.l-p.c))}return a/n}
 // Alerta no telemóvel via ntfy.sh (app ntfy, subscrever o tópico). Sem som entre as 22h e as 7h.
-function pushPhone(title,message,tags){if(!cfg.ntfy)return;const hr=new Date().getHours();const quiet=hr>=22||hr<7;
+function pushPhone(title,message,tags){const hr=new Date().getHours();const quiet=hr>=22||hr<7;
+  // Telegram (fiável no iPhone): token e chat ficam só neste navegador, nunca no código publicado
+  if(cfg.tg&&cfg.tg.token&&cfg.tg.chat){fetch(`https://api.telegram.org/bot${cfg.tg.token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chat_id:cfg.tg.chat,text:`${title}\n${message}`,disable_notification:quiet})}).catch(()=>{});return}
+  if(!cfg.ntfy)return;
   fetch('https://ntfy.sh/',{method:'POST',body:JSON.stringify({topic:cfg.ntfy,title,message,priority:quiet?2:4,tags:tags||[],click:location.href.split('?')[0]})}).catch(()=>{})}
 function openGen(b,s,side,slD,tpD,maxH,reason,extra){
   if(!cfg.bot)return `bot ${b}: bots desligados`;
@@ -512,8 +517,17 @@ function renderCfg(){
   $('vCfg').innerHTML=`<div class="card"><b>O teu setup</b><p class="mut sm">Alavancagem ${LEV}x · SL e TP a ${SLTP*100}% no preço do ativo</p>
    <label class="sm mut">Margem por trade ($)</label><input id="mIn" type="number" inputmode="decimal" value="${cfg.margin}">
    <label class="sm mut" style="display:block;margin-top:10px">Alertar liquidações acima de ($)</label><input id="lIn" type="number" inputmode="decimal" value="${cfg.liqMin}"></div>
-   <div class="card"><b>Alertas no telemóvel</b>
-    <p class="mut sm">Funcionam mesmo com a app fechada no telemóvel: o Mac envia o alerta através do ntfy (gratuito). Entre as 22h e as 7h chegam sem som.</p>
+   <div class="card"><b>Alertas no telemóvel · Telegram</b> <span class="pill up">recomendado no iPhone</span>
+    <p class="mut sm">${cfg.tg.chat?'✅ Ligado. Os alertas dos bots vão para o teu Telegram.':'Mais fiável do que o ntfy no iPhone. Demora 2 minutos:'}</p>
+    ${cfg.tg.chat?'':`<ol class="sm" style="padding-left:18px;margin:6px 0">
+     <li>No Telegram, abre o <b>@BotFather</b>, envia <b>/newbot</b>, escolhe um nome e um username (terminado em "bot").</li>
+     <li>Copia o <b>token</b> que ele te dá e cola aqui em baixo.</li>
+     <li>Abre o teu bot novo no Telegram e carrega em <b>Iniciar</b> (/start).</li>
+     <li>Volta aqui e carrega em <b>Ligar</b>.</li></ol>`}
+    <div class="row"><input id="tgTok" type="password" placeholder="token do bot (123456:ABC…)" value="${cfg.tg.token||''}" style="font-size:13px"><button class="btn acc" id="tgLink">${cfg.tg.chat?'Testar':'Ligar'}</button></div>
+    ${cfg.tg.chat?'<div class="row" style="margin-top:8px"><span class="sm mut">O token fica guardado só neste navegador.</span><span class="spacer"></span><button class="btn" id="tgOff">Desligar</button></div>':''}</div>
+   <div class="card"><b>Alertas no telemóvel · ntfy</b>
+    <p class="mut sm">Alternativa ao Telegram (só é usado se o Telegram não estiver ligado). Em ambos, entre as 22h e as 7h os alertas chegam sem som, e as opções abaixo valem para os dois.</p>
     <ol class="sm" style="padding-left:18px;margin:6px 0">
      <li>Instala a app <b>ntfy</b> no iPhone (App Store).</li>
      <li>Na app, toca em <b>+</b> e subscreve este tópico:</li></ol>
@@ -524,6 +538,12 @@ function renderCfg(){
    <div class="card"><b>Notificações</b><p class="mut sm">Com a app aberta: aviso no ecrã + vibração. Notificações do sistema só funcionam com a app adicionada ao ecrã principal e aberta.</p><button class="btn acc" id="nBtn">${cfg.notif?'Ativas ✓':'Ativar notificações'}</button></div>
    <div class="card sm"><b>Fontes</b><p class="mut">Preços, funding, OI e liquidações: Bybit (perpétuos USDT, WebSocket). Histórico: ${[...new Set(COINS.map(c=>S[c.s].src).filter(Boolean))].join(', ')||'a carregar'}. Ranking: CoinGecko.</p>
    <p class="mut">${COINS.filter(c=>!S[c.s].price).map(c=>c.s).join(', ')||'Todas as moedas com dados.'}${COINS.some(c=>!S[c.s].price)?' — ainda sem preço.':''}</p></div>`;
+  $('tgLink').onclick=async()=>{const tok=$('tgTok').value.trim();if(!tok)return toast('Cola o token primeiro');
+    try{if(!cfg.tg.chat||cfg.tg.token!==tok){const j=await fetch(`https://api.telegram.org/bot${tok}/getUpdates`).then(r=>r.json());
+      if(!j.ok)return toast('Token inválido');const u=(j.result||[]).reverse().find(x=>x.message&&x.message.chat);
+      if(!u)return toast('Envia /start ao teu bot no Telegram e tenta outra vez');cfg.tg={token:tok,chat:u.message.chat.id};save('cfg',cfg)}
+      pushPhone('Cripto Live: ligado ✓','Os alertas dos bots vão chegar aqui.');toast('Ligado — vê o Telegram');render(true)}catch(e){toast('Erro a ligar ao Telegram')}};
+  if($('tgOff'))$('tgOff').onclick=()=>{cfg.tg={token:'',chat:''};save('cfg',cfg);render(true)};
   $('ntCopy').onclick=async()=>{try{await navigator.clipboard.writeText(cfg.ntfy);toast('Tópico copiado')}catch(e){$('ntTopic').select();toast('Seleciona e copia')}};
   $('ntTest').onclick=()=>{pushPhone('Cripto Live: teste ✓','Se estás a ver isto, os alertas dos bots vão chegar ao telemóvel.',['robot']);toast('Teste enviado')};
   $('vCfg').querySelectorAll('[data-push]').forEach(el=>el.onchange=()=>{cfg.push[el.dataset.push]=el.checked;save('cfg',cfg)});
