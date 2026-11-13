@@ -244,7 +244,7 @@ function onMsg(m){
     if(sel===k&&cfg.ctf==='1m')fillChart(false);
   }else if(kind==='kline'){for(const d of m.data){const x={t:+d.start,o:+d.open,h:+d.high,l:+d.low,c:+d.close,v:+d.volume};const c=s.c15;const l=c[c.length-1];
       if(l&&l.t===x.t)c[c.length-1]=x;else if(!l||x.t>l.t)c.push(x);
-      if(d.confirm){if((x.t+M15)%3600000===0)setTimeout(()=>onHourClose(s),0);const br=findBreak(s,x);compute(s);if(br){const bot=botOnBreak(s,br.dir,br.lvl,x.c);pushAlert({t:Date.now(),s:s.s,type:'brk',dir:br.dir,txt:`${br.dir>0?'Rompeu resistência':'Perdeu suporte'} ${fp(br.lvl)} (fecho 15m ${fp(x.c)})\n${planTxt(br.dir>0?'LONG':'SHORT',x.c)}\n${bot}`},true)}}}}
+      if(d.confirm){const hEnd=x.t+M15;const br=findBreak(s,x);compute(s);if(hEnd%3600000===0)onHourClose(s,hEnd);if(br){const bot=botOnBreak(s,br.dir,br.lvl,x.c);pushAlert({t:Date.now(),s:s.s,type:'brk',dir:br.dir,txt:`${br.dir>0?'Rompeu resistência':'Perdeu suporte'} ${fp(br.lvl)} (fecho 15m ${fp(x.c)})\n${planTxt(br.dir>0?'LONG':'SHORT',x.c)}\n${bot}`},true)}}}}
   else if(kind==='allLiquidation'){for(const d of m.data){const usd=+d.v*+d.p;const side=d.S==='Buy'?'LONG':'SHORT';const it={t:+d.T,s:k,side,usd,p:+d.p};
       s.liq.unshift(it);s.liq.length=Math.min(s.liq.length,30);liqAll.unshift(it);if(liqAll.length>400)liqAll.length=400;
       if(usd>=cfg.liqMin)pushAlert({t:it.t,s:k,type:'liq',txt:`${side} liquidado ${fusd(usd)} @ ${fp(it.p)}`,dir:side==='LONG'?-1:1},false)}}
@@ -339,7 +339,8 @@ function onFunding(s,f){if(!s.price||!s.c15.length)return;const h=agg(s.c15,4);c
   if(Math.abs(f)>=.00015)openGen('F',s,side,2*a,2*a,24,r,{fund:f});
   if(Math.abs(f)>=.0003)openGen('F+',s,side,2*a,2*a,24,r,{fund:f});}
 // G: no fecho de cada hora, vela de 1h ≥2,5×ATR com volume ≥3× a média de 24h → aposta na reversão
-function onHourClose(s){const h=agg(s.c15,4);const n=h.length;if(n<30)return;const last=h[n-1];if(Date.now()-last.t<3600000-60000)return;
+// corrigido 13/11: usa só velas até ao fim da hora (antes, a vela nova que chegava na mesma mensagem fazia o G nunca disparar)
+function onHourClose(s,end){const h=agg(s.c15.filter(x=>x.t<end),4);const n=h.length;if(n<30)return;const last=h[n-1];if(end-last.t!==3600000)return;
   const ap=atrH(h,n-2);if(!ap)return;const mv=last.c-h[n-2].c;const av=h.slice(n-25,n-1).reduce((x,y)=>x+y.v,0)/24;
   if(!(av>0)||last.v<3*av||Math.abs(mv)<2.5*ap)return;const a=atrH(h,n-1)||ap;
   openGen('G',s,mv<0?'LONG':'SHORT',1.5*a,1.5*a,12,`vela 1h ${mv<0?'de pânico':'de euforia'} ${fpct(last.c/h[n-2].c-1)} · volume ${(last.v/av).toFixed(1)}×`);}
