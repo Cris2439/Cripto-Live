@@ -139,7 +139,9 @@ const M15=900000;
 const S={}; const SYM2C={};
 COINS.forEach(c=>{S[c.s]={...c,price:null,ch24:null,funding:null,oi:null,turn:null,hi:null,lo:null,rank:null,mcap:null,c15:[],lv:{sup:[],res:[]},ind:null,liq:[],src:null};
   [c.s+'USDT',...(c.alt||[])].forEach(x=>SYM2C[x]=c.s);});
-const cfg=load('cfg',{botSlip:0.05,botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
+const cfg=load('cfg',{ntfy:'',push:{G:true,F:false,'F+':false,fecho:true},botSlip:0.05,botPct:1.5,bot:true,botMax:5,botSc:2,ctf:'15m',margin:100,liqMin:250000,notif:false,tf:'1h',sz:'chg'});
+if(!cfg.ntfy){cfg.ntfy='cripto-live-'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,8);save('cfg',cfg)}
+if(!cfg.push)cfg.push={G:true,F:false,'F+':false,fecho:true};
 let alerts=load('alerts',[]); let unseen=0;
 const liqAll=[]; // {t,s,side,usd}
 
@@ -319,6 +321,9 @@ function tryBot(b,s,dir,lvl,close){
   BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);return `🤖 bot ${b} abriu ${side} @ ${fp(close)}`;
 }
 function atrH(h,end,n=14){if(end<n+1)return null;let a=0;for(let i=end-n+1;i<=end;i++){const x=h[i],p=h[i-1];a+=Math.max(x.h-x.l,Math.abs(x.h-p.c),Math.abs(x.l-p.c))}return a/n}
+// Alerta no telemóvel via ntfy.sh (app ntfy, subscrever o tópico). Sem som entre as 22h e as 7h.
+function pushPhone(title,message,tags){if(!cfg.ntfy)return;const hr=new Date().getHours();const quiet=hr>=22||hr<7;
+  fetch('https://ntfy.sh/',{method:'POST',body:JSON.stringify({topic:cfg.ntfy,title,message,priority:quiet?2:4,tags:tags||[],click:location.href.split('?')[0]})}).catch(()=>{})}
 function openGen(b,s,side,slD,tpD,maxH,reason,extra){
   if(!cfg.bot)return `bot ${b}: bots desligados`;
   const now=Date.now();const mine=x=>botOf(x)===b;const why=[];
@@ -331,6 +336,7 @@ function openGen(b,s,side,slD,tpD,maxH,reason,extra){
     liq:L?p*(1-1/LEV+MMR):p*(1+1/LEV-MMR),margin:cfg.margin,t0:now,maxT:now+maxH*3600000,sc:s.ind?s.ind.sc:null,r15:s.ind&&s.ind.r15!=null?Math.round(s.ind.r15):null,reason,note:'',...(extra||{})};
   BOT.open.push(t);botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
   pushAlert({t:now,s:s.s,type:'bot',dir:L?1:-1,txt:`🤖 bot ${b} abriu ${side} @ ${fp(p)} · ${reason}\nSL ${fp(t.sl)} · TP ${fp(t.tp)} · saída máx. em ${maxH}h`},true);
+  if(cfg.push&&cfg.push[b])pushPhone(`Bot ${b}: ${side} ${s.s} @ ${fp(p)}`,`${reason}\nSL ${fp(t.sl)} · TP ${fp(t.tp)} · saída máx. ${maxH}h`,[L?'chart_with_upwards_trend':'chart_with_downwards_trend']);
   return `bot ${b} abriu ${side}`;
 }
 // F / F+: no momento da liquidação do funding, contra o lado que paga (multidão alavancada)
@@ -347,6 +353,7 @@ function onHourClose(s,end){const h=agg(s.c15.filter(x=>x.t<end),4);const n=h.le
 function botClose(t,exit,how,when){
   const i=BOT.open.indexOf(t);if(i<0)return;BOT.open.splice(i,1);
   const c={...t,exit,t1:when||Date.now(),how,pnl:pnlOf(t,exit,how)};BOT.closed.unshift(c);if(BOT.closed.length>500)BOT.closed.length=500;botSave();if(curView==='vBot')setTimeout(()=>render(true),0);
+  if(cfg.push&&cfg.push.fecho&&cfg.push[botOf(t)]&&!how.includes('offline'))pushPhone(`Bot ${botOf(t)}: ${t.s} fechado em ${how}`,`${t.side} ${fp(t.entry)} → ${fp(exit)} · ${fmtPnl(c.pnl)}`,[c.pnl>0?'white_check_mark':'x']);
   pushAlert({t:c.t1,s:t.s,type:'bot',dir:c.pnl>0?1:-1,txt:`🤖 bot ${botOf(t)} · ${t.side} fechado em ${how} @ ${fp(exit)} · ${fmtPnl(c.pnl)}`},true);
 }
 function num(x){return x==null?'':+(+x).toPrecision(6)}
@@ -505,9 +512,21 @@ function renderCfg(){
   $('vCfg').innerHTML=`<div class="card"><b>O teu setup</b><p class="mut sm">Alavancagem ${LEV}x · SL e TP a ${SLTP*100}% no preço do ativo</p>
    <label class="sm mut">Margem por trade ($)</label><input id="mIn" type="number" inputmode="decimal" value="${cfg.margin}">
    <label class="sm mut" style="display:block;margin-top:10px">Alertar liquidações acima de ($)</label><input id="lIn" type="number" inputmode="decimal" value="${cfg.liqMin}"></div>
+   <div class="card"><b>Alertas no telemóvel</b>
+    <p class="mut sm">Funcionam mesmo com a app fechada no telemóvel: o Mac envia o alerta através do ntfy (gratuito). Entre as 22h e as 7h chegam sem som.</p>
+    <ol class="sm" style="padding-left:18px;margin:6px 0">
+     <li>Instala a app <b>ntfy</b> no iPhone (App Store).</li>
+     <li>Na app, toca em <b>+</b> e subscreve este tópico:</li></ol>
+    <div class="row"><input id="ntTopic" readonly value="${cfg.ntfy}" style="font-size:13px"><button class="btn" id="ntCopy">Copiar</button></div>
+    <div class="pills" style="margin-top:10px">${['G','F','F+'].map(b=>`<label class="pill" style="cursor:pointer"><input type="checkbox" data-push="${b}" ${cfg.push[b]?'checked':''} style="width:auto;margin:0 4px 0 0">Entradas bot ${b}</label>`).join('')}
+     <label class="pill" style="cursor:pointer"><input type="checkbox" data-push="fecho" ${cfg.push.fecho?'checked':''} style="width:auto;margin:0 4px 0 0">Também os fechos</label></div>
+    <div class="row" style="margin-top:10px"><span class="sm mut">O tópico funciona como uma senha: não o partilhes.</span><span class="spacer"></span><button class="btn acc" id="ntTest">Enviar teste</button></div></div>
    <div class="card"><b>Notificações</b><p class="mut sm">Com a app aberta: aviso no ecrã + vibração. Notificações do sistema só funcionam com a app adicionada ao ecrã principal e aberta.</p><button class="btn acc" id="nBtn">${cfg.notif?'Ativas ✓':'Ativar notificações'}</button></div>
    <div class="card sm"><b>Fontes</b><p class="mut">Preços, funding, OI e liquidações: Bybit (perpétuos USDT, WebSocket). Histórico: ${[...new Set(COINS.map(c=>S[c.s].src).filter(Boolean))].join(', ')||'a carregar'}. Ranking: CoinGecko.</p>
    <p class="mut">${COINS.filter(c=>!S[c.s].price).map(c=>c.s).join(', ')||'Todas as moedas com dados.'}${COINS.some(c=>!S[c.s].price)?' — ainda sem preço.':''}</p></div>`;
+  $('ntCopy').onclick=async()=>{try{await navigator.clipboard.writeText(cfg.ntfy);toast('Tópico copiado')}catch(e){$('ntTopic').select();toast('Seleciona e copia')}};
+  $('ntTest').onclick=()=>{pushPhone('Cripto Live: teste ✓','Se estás a ver isto, os alertas dos bots vão chegar ao telemóvel.',['robot']);toast('Teste enviado')};
+  $('vCfg').querySelectorAll('[data-push]').forEach(el=>el.onchange=()=>{cfg.push[el.dataset.push]=el.checked;save('cfg',cfg)});
   $('mIn').onchange=e=>{cfg.margin=+e.target.value||0;save('cfg',cfg)};
   $('lIn').onchange=e=>{cfg.liqMin=+e.target.value||0;save('cfg',cfg)};
   $('nBtn').onclick=async()=>{try{if(!('Notification'in window))return toast('Este browser não suporta notificações aqui');const p=await Notification.requestPermission();cfg.notif=p==='granted';save('cfg',cfg);toast(cfg.notif?'Notificações ativas':'Permissão recusada');render(true)}catch(e){toast('Não foi possível ativar')}};
